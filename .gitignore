@@ -1,0 +1,27 @@
+# -------------------------
+# Python / FastAPI backend
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+*.manifest
+*.spec
+
+# Virtualenv
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+
+
+app.db
+app.db-shm
+app.db-wal
