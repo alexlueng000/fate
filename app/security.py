@@ -1,29 +1,14 @@
-from datetime import datetime, timedelta
-from jose import jwt
-from fastapi import HTTPException, Depends
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.orm import Session
-from .config import settings
-from .db import get_db
-from . import models
+import time, hmac, hashlib, base64, json
+from typing import Any
 
-bearer = HTTPBearer(auto_error=False)
-
-def create_token(user_id: int) -> str:
-    exp = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "exp": exp}
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALG)
-
-def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer),
-                     db: Session = Depends(get_db)) -> models.User:
-    if not creds:
-        raise HTTPException(status_code=401, detail="Missing token")
-    try:
-        data = jwt.decode(creds.credentials, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    uid = int(data.get("sub", "0"))
-    user = db.get(models.User, uid)
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
+def jwt_encode(payload: dict, secret: str, alg: str = "HS256", exp_minutes: int = 60*24*7) -> str:
+    header = {"typ": "JWT", "alg": alg}
+    now = int(time.time())
+    payload = {**payload, "iat": now, "exp": now + exp_minutes*60}
+    def b64(x: bytes) -> str:
+        return base64.urlsafe_b64encode(x).rstrip(b"=").decode()
+    header_b64 = b64(json.dumps(header, separators=(",", ":")).encode())
+    payload_b64 = b64(json.dumps(payload, separators=(",", ":")).encode())
+    signing = f"{header_b64}.{payload_b64}".encode()
+    sig = hmac.new(secret.encode(), signing, hashlib.sha256).digest()
+    return f"{header_b64}.{payload_b64}.{b64(sig)}"

@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
 
     @app.get("/")
     def ping():
-        return {"ok": True, "app": settings.APP_NAME}
+        return {"ok": True, "app": settings.app_name}
 
     return app
 

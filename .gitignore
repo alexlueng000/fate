@@ -17,6 +17,7 @@ build/
 # Virtualenv
 .venv/
 venv/
+venv311/
 ENV/
 env/
 env.bak/

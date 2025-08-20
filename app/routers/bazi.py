@@ -2,7 +2,7 @@ import json
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from ..db import get_db
-from ..security import get_current_user
+# from ..security import get_current_user
 from ..schemas import BaziComputeRequest, BaziComputeResponse
 from ..services.bazi import compute_bazi_demo, bazi_fingerprint
 from .. import models
@@ -10,7 +10,7 @@ from .. import models
 router = APIRouter(prefix="/bazi", tags=["bazi"])
 
 @router.post("/compute", response_model=BaziComputeResponse)
-def compute(req: BaziComputeRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def compute(req: BaziComputeRequest, db: Session = Depends(get_db), user=Depends()):
     fp = bazi_fingerprint(req.birth_ts, req.calendar, req.city, req.lat, req.lng)
     row = db.query(models.BaziProfile).filter_by(fingerprint=fp, user_id=user.id).first()
     if row:

@@ -2,13 +2,17 @@ from pydantic import BaseModel, Field
 from typing import Literal, List, Optional, Any
 
 # Auth
-class LoginRequest(BaseModel):
+class LoginIn(BaseModel):
     js_code: str
-    nickname: Optional[str] = None
-    avatar: Optional[str] = None
+    nickname: str | None = None
 
-class TokenResponse(BaseModel):
-    token: str
+class LoginOut(BaseModel):
+    openid: str
+    unionid: str | None = None
+    session_key: str | None = None
+    access_token: str
+
+
 
 # Chat
 class Msg(BaseModel):
