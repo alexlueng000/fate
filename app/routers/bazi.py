@@ -17,6 +17,11 @@ from .. import models
 
 router = APIRouter(prefix="/bazi", tags=["bazi"])
 
+#========================================
+# COZE版代码
+#========================================
+
+
 # 地名 -> 经纬度
 def geocode_city(city: str):
     url = "https://nominatim.openstreetmap.org/search"
@@ -32,10 +37,6 @@ def geocode_city(city: str):
         "lng": float(data[0]["lon"])
     }
 
-
-#========================================
-# 真太阳时计算 COZE版
-#========================================
 
 class SolarIn(BaseModel):
     birth_date: str   # "YYYY-MM-DD HH:MM:SS"
@@ -65,7 +66,7 @@ def calc_true_solar(body: SolarIn):
 
 class PaipanIn(BaseModel):
     gender: str              # "男" 或 "女"
-    birthday_adjusted: str   # "YYYY-MM-DD HH:MM:SS"
+    birthday_adjusted: str   # "YYYY-MM-DD HH:MM:SS" 通过经纬度算出来的真太阳时
 
 @router.post("/calc")
 def calc_bazi(body: PaipanIn):

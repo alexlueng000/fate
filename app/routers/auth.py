@@ -1,5 +1,5 @@
 # app/api/auth.py
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from app.schemas import LoginIn, LoginOut
 from app.security import jwt_encode
 from app.services.wechat import jscode2session
@@ -33,5 +33,5 @@ async def login(body: LoginIn):
     # TODO: 这里可落库：若无则创建用户，有则更新 last_login、昵称等
     # await upsert_user(openid=openid, nickname=body.nickname)
 
-    token = jwt_encode({"sub": openid}, settings.JWT_SECRET, settings.JWT_ALG, settings.JWT_EXPIRE_MINUTES)
+    token = jwt_encode({"sub": openid}, settings.jwt_secret, settings.jwt_alg, settings.jwt_expire_minutes)
     return LoginOut(openid=openid, unionid=unionid, session_key=session_key, access_token=token)
