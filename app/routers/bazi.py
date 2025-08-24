@@ -89,7 +89,7 @@ class PaipanIn(BaseModel):
     birth_date: str = Field(..., description="YYYY-MM-DD")
     birth_time: str = Field(..., description="HH:MM")  # 24小时制
     birthplace: str = Field(..., description="城市名称，如：广东阳春")
-    use_true_solar: bool = True            # 是否启用真太阳时（默认启用）
+    use_true_solar: bool = False           # 是否启用真太阳时（默认不启用）
 
     # 可选直传（若前端已拿到经纬度，可跳过地名解析）
     lat: Optional[float] = None
