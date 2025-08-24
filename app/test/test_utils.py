@@ -1,3 +1,15 @@
+import os
+import sys
+
+# === 让 Python 能找到两级目录外的 kb_rag_mult.py ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SYS_KB_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
+if SYS_KB_ROOT not in sys.path:
+    sys.path.insert(0, SYS_KB_ROOT)
+
+# 这三个是你 kb_rag_mult.py 里已有的函数/类
+from kb_rag_mult import load_index, EmbeddingBackend, top_k_cosine
+
 import requests
 import uuid
 from datetime import datetime, timedelta
@@ -205,9 +217,40 @@ def format_dayun(dy: List[Dict]) -> str:
 
 
 
-def apply_template(FOUR_PILLARS: Dict[str, List[str]], DAYUN: List[Dict]) -> str:
-    return system_prompt.replace("{FOUR_PILLARS}", format_four_pillars(FOUR_PILLARS)) \
-                          .replace("{DAYUN}", format_dayun(DAYUN))
+# def apply_template(FOUR_PILLARS: Dict[str, List[str]], DAYUN: List[Dict]) -> str:
+#     return system_prompt.replace("{FOUR_PILLARS}", format_four_pillars(FOUR_PILLARS)) \
+#                           .replace("{DAYUN}", format_dayun(DAYUN))
+
+
+def retrieve_kb(query: str, index_dir: str, k: int = 3) -> List[str]:
+    """从本地知识库取 Top-k 片段，返回带文件名的片段文本列表"""
+    chunks, sources, embs, meta = load_index(index_dir)
+    eb = EmbeddingBackend(force_backend=meta.get("backend", "st"))
+    if meta.get("backend") == "tfidf" and eb.vectorizer is not None:
+        eb.vectorizer.fit(chunks)
+    q_vec = eb.transform([query])
+    idxs = top_k_cosine(q_vec, embs, k=k)
+    passages = []
+    for i in idxs:
+        file_ = sources[i]["file"] if i < len(sources) else "unknown"
+        passages.append(f"【{file_}】{chunks[i]}")
+    return passages
+
+
+def build_full_system_prompt(mingpan: Dict[str, Any], kb_passages: List[str]) -> str:
+    """把四柱/大运 + 知识库片段一起塞到 system prompt"""
+    fp_text = format_four_pillars(mingpan["four_pillars"])
+    dy_text = format_dayun(mingpan["dayun"])
+    # 你的 system_prompt 用的是 {{FOUR_PILLARS}}/{{DAYUN}}，这里替换为实际文本
+    composed = system_prompt.replace("{FOUR_PILLARS}", fp_text).replace("{DAYUN}", dy_text)
+    if kb_passages:
+        kb_block = "\n\n".join(kb_passages[:3])  # 控制长度，最多取3段
+        composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+
+    print("最终的提示词: ", composed)
+    
+    return composed
+    
 
 # ====== 调用 DeepSeek ======
 def call_deepseek(messages: List[Dict[str, str]]) -> str:
@@ -238,6 +281,11 @@ def main():
     # print("真太阳时：", true_sun)
     bazi = calc_bazi(PaipanIn(gender="男", birthday_adjusted=true_sun.get("true_solar_time")))
 
+     # —— 在进入循环前准备好 KB 索引目录（两级外的 kb_index）
+    kb_index_dir = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "kb_index"))
+    if not os.path.exists(os.path.join(kb_index_dir, "chunks.json")):
+        print(f"⚠️ 未发现知识库索引：{kb_index_dir}，将不启用RAG检索。可先运行 kb_rag_multi.py 构建。")
+
     print("==== 八字对话助手（本地 CLI）====")
     print("输入 exit 退出\n")
 
@@ -245,10 +293,22 @@ def main():
         user_msg = input("你: ").strip()
         if user_msg.lower() in ("exit", "quit"):
             break
+        if not user_msg:
+            continue
+
+        # 依据问题做知识检索（若索引存在）
+        kb_passages = []
+        if os.path.exists(os.path.join(kb_index_dir, "chunks.json")):
+            try:
+                kb_passages = retrieve_kb(user_msg, kb_index_dir, k=3)
+            except Exception as e:
+                print(f"RAG 检索失败（忽略继续）：{e}")
+
+        # 拼接完整的 system 提示（命盘 + 知识库）
+        composed_prompt = build_full_system_prompt(bazi["mingpan"], kb_passages)
 
         # 组装 messages
-        system_prompt = apply_template(bazi.get("mingpan").get("four_pillars"), bazi.get("mingpan").get("dayun"))
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": composed_prompt}]
         messages.extend(history[-10:])   # 只保留最近10条历史
         messages.append({"role": "user", "content": user_msg})
 
