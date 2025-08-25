@@ -14,6 +14,7 @@ from ..db import get_db
 from ..schemas import BaziComputeRequest, BaziComputeResponse
 from ..services.bazi import compute_bazi_demo, bazi_fingerprint
 from .. import models
+from ..utils import geo_amap
 
 Gender = Literal["男", "女"]
 Calendar = Literal["gregorian", "lunar"]
@@ -26,20 +27,6 @@ router = APIRouter(prefix="/bazi", tags=["bazi"])
 
 
 # 地名 -> 经纬度
-def geocode_city(city: str):
-    url = "https://nominatim.openstreetmap.org/search" # 可以换别的API
-    params = {"q": city, "format": "json", "limit": 1}
-    headers = {"User-Agent": "bazi-app/1.0"}  # Nominatim 要求设置 UA
-    r = requests.get(url, params=params, headers=headers)
-    data = r.json()
-    if not data:
-        return {"error": f"找不到城市: {city}"}
-    return {
-        "city": city,
-        "lat": float(data[0]["lat"]),
-        "lng": float(data[0]["lon"])
-    }
-
 
 class SolarIn(BaseModel):
     birth_date: str   # "YYYY-MM-DD HH:MM:SS"
@@ -89,7 +76,7 @@ class PaipanIn(BaseModel):
     birth_date: str = Field(..., description="YYYY-MM-DD")
     birth_time: str = Field(..., description="HH:MM")  # 24小时制
     birthplace: str = Field(..., description="城市名称，如：广东阳春")
-    use_true_solar: bool = False           # 是否启用真太阳时（默认不启用）
+    use_true_solar: bool = True           # 是否启用真太阳时（默认不启用）
 
     # 可选直传（若前端已拿到经纬度，可跳过地名解析）
     lat: Optional[float] = None
@@ -120,7 +107,7 @@ def to_birthday_adjusted(inb: PaipanIn) -> str:
     elif inb.lng is not None:
         longitude = inb.lng
     else:
-        geo = geocode_city(inb.birthplace)
+        geo = geo_amap.geocode_city(inb.birthplace)
         if "error" in geo:
             # 回退成“本地时”，也可以选择抛错
             # raise HTTPException(400, f"地名解析失败：{geo['error']}")
