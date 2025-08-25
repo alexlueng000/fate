@@ -1,7 +1,7 @@
 # app/api/auth.py
 from fastapi import APIRouter, HTTPException
 from app.schemas import LoginIn, LoginOut
-from app.security import jwt_encode
+# from app.security import jwt_encode
 from app.services.wechat import jscode2session
 from app.config import settings
 
@@ -12,7 +12,7 @@ async def login(body: LoginIn):
     # 本地开发直通：js_code=dev 时伪造 openid，便于小程序端先联调
     if body.js_code == "dev":
         openid = "oDEV-openid-123456"
-        token = jwt_encode({"sub": openid}, settings.jwt_secret, settings.jwt_alg, settings.jwt_expire_minutes)
+        # token = jwt_encode({"sub": openid}, settings.jwt_secret, settings.jwt_alg, settings.jwt_expire_minutes)
         return LoginOut(openid=openid, unionid=None, session_key=None, access_token=token)
 
     # 真机环境：调用微信 jscode2session
