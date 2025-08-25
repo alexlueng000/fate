@@ -5,7 +5,7 @@ from pydantic import Field
 class Settings(BaseSettings):
     app_name: str = "Bazi AI Backend"
     debug: bool = True
-    database_url: str = Field(default="sqlite:///./app.db", validation_alias="DATABASE_URL")
+    database_url: str = "mysql+pymysql://root:123456@127.0.0.1:3306/fate"
 
     jwt_secret: str = Field(default="change-me", validation_alias="JWT_SECRET")
     jwt_alg: str = Field(default="HS256", validation_alias="JWT_ALG")

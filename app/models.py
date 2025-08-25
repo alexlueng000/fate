@@ -1,91 +1,109 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, Float, UniqueConstraint
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from __future__ import annotations
+
 from datetime import datetime
-from .db import Base
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import (
+    String, Integer, DateTime, ForeignKey, Text, Boolean, UniqueConstraint, func
+)
+from app.db import Base
+
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    openid: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    unionid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    openid: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     nickname: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    avatar: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    region: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    flags: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
 
-class Session(Base):
-    __tablename__ = "sessions"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    scene: Mapped[str] = mapped_column(String(16))  # chat / pan / consult
-    status: Mapped[str] = mapped_column(String(16), default="active")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-class Message(Base):
-    __tablename__ = "messages"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("sessions.id"), index=True)
-    role: Mapped[str] = mapped_column(String(16))  # user/assistant/system
-    content: Mapped[str] = mapped_column(Text)
-    tokens_in: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    tokens_out: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    moderation: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-class BaziProfile(Base):
-    __tablename__ = "bazi_profiles"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    birth_ts: Mapped[int] = mapped_column(Integer)   # 秒级时间戳
-    calendar: Mapped[str] = mapped_column(String(8)) # solar/lunar
-    city: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
-    lng: Mapped[float | None] = mapped_column(Float, nullable=True)
-    fingerprint: Mapped[str] = mapped_column(String(128), index=True)
-    result_json: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    __table_args__ = (UniqueConstraint("fingerprint", name="ux_bazi_fingerprint"),)
+    # 方便反查
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="user", cascade="all,delete-orphan", passive_deletes=True
+    )
+    entitlements: Mapped[list["Entitlement"]] = relationship(
+        back_populates="user", cascade="all,delete-orphan", passive_deletes=True
+    )
 
 class Product(Base):
     __tablename__ = "products"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sku: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    name: Mapped[str] = mapped_column(String(64))
-    type: Mapped[str] = mapped_column(String(16))  # oneoff/subscription
-    price: Mapped[int] = mapped_column(Integer)    # 分
-    currency: Mapped[str] = mapped_column(String(8), default="CNY")
-    active: Mapped[bool] = mapped_column(Boolean, default=True)
-    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)  # e.g. REPORT_UNLOCK
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)  # 990 = 9.90
+    currency: Mapped[str] = mapped_column(String(8), default="CNY", nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="product", cascade="all,delete-orphan", passive_deletes=True
+    )
 
 class Order(Base):
     __tablename__ = "orders"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"))
-    amount: Mapped[int] = mapped_column(Integer)  # 分
-    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/paid/closed/refunded
-    channel: Mapped[str] = mapped_column(String(16), default="wechat")
-    attach: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-class PaymentWeChat(Base):
-    __tablename__ = "payment_wechat"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=False
+    )
+    amount_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default="CREATED", nullable=False
+    )  # CREATED, PAID, CANCELED, REFUNDED
+    out_trade_no: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)  # 商户单号
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="orders")
+    product: Mapped["Product"] = relationship(back_populates="orders")
+    payments: Mapped[list["Payment"]] = relationship(
+        back_populates="order", cascade="all,delete-orphan", passive_deletes=True
+    )
+
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    order_id: Mapped[int] = mapped_column(
+        ForeignKey("orders.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)  # WECHAT_JSAPI / WECHAT_NATIVE
     prepay_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    transaction_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    payer_openid: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    amount: Mapped[int] = mapped_column(Integer)
-    status: Mapped[str] = mapped_column(String(16), default="created")  # created/success/failed
-    raw_callback_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    transaction_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # 微信支付单号
+    status: Mapped[str] = mapped_column(
+        String(20), default="PENDING", nullable=False
+    )  # PENDING, SUCCESS, FAIL
+    raw: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    order: Mapped["Order"] = relationship(back_populates="payments")
+
 
 class Entitlement(Base):
     __tablename__ = "entitlements"
+    __table_args__ = (UniqueConstraint("user_id", "product_code", name="uq_user_product"),)
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    sku: Mapped[str] = mapped_column(String(64))
-    quota: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 次数包；None=无限
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="active")
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    product_code: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+    granted_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+    user: Mapped["User"] = relationship(back_populates="entitlements")
+
+
+class WebhookLog(Base):
+    __tablename__ = "webhooks_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)  # WECHAT
+    event_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)

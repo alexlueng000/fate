@@ -229,3 +229,18 @@ def handler(args: Args[Input]) -> Output:
         # 在插件中，通过抛出异常来报告错误是标准做法
         # Coze平台会捕获这个异常并显示为错误状态
         raise Exception(f"排盘插件执行失败: {e}")
+
+
+zsh: event not found: Passw0rd
+
+
+docker run -d \
+  --name mysql8.4 \
+  -p 127.0.0.1:3306:3306 \
+  -e MYSQL_ROOT_PASSWORD=turkey414 \
+  -e TZ=Asia/Shanghai \
+  -v mysql8-data:/var/lib/mysql \
+  -v $PWD/my.cnf:/etc/mysql/conf.d/my.cnf:ro \
+  mysql:8.4 \
+  --character-set-server=utf8mb4 \
+  --collation-server=utf8mb4_0900_ai_ci
