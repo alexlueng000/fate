@@ -21,6 +21,7 @@ venv311/
 ENV/
 env/
 env.bak/
+.env
 
 
 app.db

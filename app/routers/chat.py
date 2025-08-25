@@ -26,7 +26,7 @@ system_prompt = SYSTEM_PROMPT
 
 
 # ====== 环境变量里的 Key，别硬编码 ======
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", DEEPSEEK_API_KEY)  # 兼容你之前的变量，建议删硬编码
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_MODEL   = "deepseek-chat"
 
