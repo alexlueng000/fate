@@ -50,72 +50,37 @@ from datetime import datetime, timedelta
 async def main(args: Args) -> Output:
 
     """
-
     最终版：回归官方示例的本质，直接创建并返回一个标准的Python字典(dict)，
-
     以确保能够通过平台最终的JSON序列化步骤。
-
     """
-
     try:
-
         # 步骤 1: 从 args.params 中获取输入参数
-
         params = args.params
-
         birth_date_str = str(params['birth_date'])
-
         longitude_str = str(params['longitude'])
 
-
-
         # 步骤 2: 处理经度
-
         try:
-
             longitude_float = float(longitude_str)
-
         except ValueError:
-
             # 直接返回一个标准的字典
-
             return {
-
                 "error": f"无效的经度值: '{longitude_str}'。它必须是一个有效的数字。"
-
             }
 
-
-
         # 步骤 3: 处理日期
-
         original_birth_date = datetime.strptime(birth_date_str, '%Y-%m-%d %H:%M:%S')
-
-
-
         # 步骤 4: 执行核心计算
-
         reference_longitude = 120.0
-
         time_difference_minutes = (longitude_float - reference_longitude) * 4
-
         time_delta = timedelta(minutes=time_difference_minutes)
-
         birthday_adjusted_obj = original_birth_date + time_delta
-
         birthday_adjusted_str = birthday_adjusted_obj.strftime('%Y-%m-%d %H:%M:%S')
 
-
-
         # 步骤 5: 直接返回包含成功结果的、标准的字典
-
         return {
-
             "birthday_adjusted": birthday_adjusted_str
-
         }
-
-
 
     except Exception as e:
 
