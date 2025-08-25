@@ -149,6 +149,7 @@ def calc_bazi(body: PaipanIn):
       }
     }
     """
+    print("输入参数：", body)
     try:
         # 1) 解析时间
         birthday_adjusted = to_birthday_adjusted(body)
@@ -191,4 +192,5 @@ def calc_bazi(body: PaipanIn):
             }
         }
     except Exception as e:
+        print("出错：", e)
         return {"error": f"{type(e).__name__}: {e}"}
