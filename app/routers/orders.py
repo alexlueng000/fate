@@ -1,28 +1,61 @@
-from fastapi import APIRouter, Depends, HTTPException
+# app/routers/orders.py
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from ..db import get_db
-# from ..security import get_current_user
-from .. import models
-from ..schemas import CreateOrderRequest, OrderOut, PrepayRequest, PrepayResponse
-from ..services.payments import create_prepay_stub
+
+from app.db import get_db_tx
+from app.deps import get_current_user
+from app.schemas import OrderCreate, OrderOut
+from app.models import User, Order
+from app.services.orders import create_order_by_code, get_orders_by_user, get_order_by_id_for_user
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
-@router.post("/create", response_model=OrderOut)
-def create_order(req: CreateOrderRequest, db: Session = Depends(get_db)):
-    prod = db.query(models.Product).filter_by(sku=req.sku, active=True).first()
-    if not prod:
-        raise HTTPException(404, "product not found")
-    order = models.Order(user_id=user.id, product_id=prod.id, amount=prod.price, status="pending")
-    db.add(order); db.commit(); db.refresh(order)
-    return OrderOut(order_id=order.id, amount=order.amount, status=order.status)
 
-@router.post("/prepay", response_model=PrepayResponse)
-def prepay(req: PrepayRequest, db: Session = Depends(get_db)):
-    order = db.get(models.Order, req.order_id)
+@router.post("", response_model=OrderOut, status_code=status.HTTP_201_CREATED)
+def create_order(
+    body: OrderCreate,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+) -> OrderOut:
+    """
+    创建订单：
+    - 不传 product_code 则自动使用默认单品（settings.single_product_code）
+    - 返回订单基础信息（状态为 CREATED）
+    """
+    try:
+        order: Order = create_order_by_code(
+            db, user=current_user, product_code=body.product_code, active_only=True
+        )
+        return order
+    except ValueError as e:
+        # 商品不存在或未上架
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/my", response_model=list[OrderOut])
+def list_my_orders(
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+) -> list[OrderOut]:
+    """
+    查询我的订单列表（按创建时间倒序，默认最多 50 条）。
+    """
+    return get_orders_by_user(db, user=current_user, limit=50, offset=0)
+
+
+@router.get("/{order_id}", response_model=OrderOut)
+def get_my_order(
+    order_id: int,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+) -> OrderOut:
+    """
+    获取我的某一笔订单详情。
+    —— 含“越权保护”：只能读取属于自己的订单。
+    """
+    order = get_order_by_id_for_user(db, user=current_user, order_id=order_id)
     if not order:
-        raise HTTPException(404, "order not found")
-    if order.status != "pending":
-        raise HTTPException(400, "order not pending")
-    prepay_id, pay_params = create_prepay_stub(db, order, openid=req.openid)
-    return PrepayResponse(prepay_id=prepay_id, pay_params=pay_params)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    return order
