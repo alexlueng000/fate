@@ -244,3 +244,54 @@ docker run -d \
   mysql:8.4 \
   --character-set-server=utf8mb4 \
   --collation-server=utf8mb4_0900_ai_ci
+
+
+快速复查：支付 → 发放权益链路的逻辑安全点
+
+下面是基于你当前代码的“只评审、不改动”清单；等你点头我们再逐条按“单文件”节奏加固。
+
+回调验签与金额校验（需加强）
+
+现在 webhooks.py（prod）已进行签名校验与AES-GCM 解密，这很好。
+
+但还没核对金额/币种：应从明文 resource_plain["amount"]["total"] 与 ["amount"]["payer_total"] 中核对是否等于 order.amount_cents 与期望币种，防止金额被劫持或产品不一致导致“低价购买高价权益”。
+
+建议：在 TRANSACTION.SUCCESS 分支里，核对 out_trade_no、transaction_id、trade_state=="SUCCESS"、金额、货币、（可选）商户号与 appid。
+
+回放攻击（需建议性处理）
+
+已包含 Timestamp/Nonce 在验签消息里，基本合规；为了更稳，建议把 (timestamp, nonce, signature) 做5–10分钟内去重（存入 Redis/DB 防重复），避免签名被重放。
+
+幂等与状态机
+
+payments.mark_success() 幂等性OK：订单已 PAID 时不会重复改。
+
+建议在 orders 状态机上再明确：只允许 CREATED → PAID，拒绝 CANCELED → PAID 之类的异常跃迁（现在的代码自然不会发生，但显式判断更稳）。
+
+发放权益时点
+
+现在在 mark_success 之后立即 grant()，符合业务。
+
+如果未来有“按次消费”（一次支付只解一次）的模型，需要在 entitlements 之外设计“计次表”，当前 entitlements 是“是否解锁”的布尔性质（唯一约束），并不记录次数。
+
+开发模式（dev）风险界定
+
+dev 模式跳过验签与解密，仅用于联调；一定要用配置开关保护，并且不要在生产环境开启。
+
+建议在 settings 中强制 wechat_pay_mode 默认 prod，在 .env.dev 里显式改为 dev，避免错配。
+
+依赖与配置健壮性
+
+API_V3_KEY 必须 32 字节；建议在应用启动时做一次长度校验（现在是回调时才校验）。
+
+平台公钥/证书更新：多证书轮换时需要根据 Wechatpay-Serial 选择对应证书；当前实现只加载一个公钥 PEM，足够起步，日后再扩展“序列号 → 公钥”映射。
+
+数据访问 API 细节
+
+在 deps.py 里有一处 db.query(User).get(user_id)，这是 SQLAlchemy 2.x 的老写法（还能用，但已过时）。建议后续单独一步把它替换为 db.get(User, user_id)。
+
+这不是安全漏洞，只是技术债提醒。
+
+返回值与 HTTP 语义
+
+webhooks.py 里返回 (dict, status) 的 tuple FastAPI 是接受的；为一致性也可用 JSONResponse（非必须）。

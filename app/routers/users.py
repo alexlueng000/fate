@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db_tx
 from app.schemas import LoginRequest, Token, UserOut
 from app.security import create_access_token
-from app.services.user import get_or_create_by_openid
+from app.services.users import get_or_create_by_openid
 from app.deps import get_current_user
 from app.models import User
 from app.config import settings

@@ -1,39 +1,50 @@
-import json
-from fastapi import APIRouter, Depends, Request, HTTPException
+# app/routers/payments.py
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from ..db import get_db
-from .. import models
-from ..schemas import NotifyResult
-from ..services.payments import mark_paid_and_grant
-from ..config import settings
 
-router = APIRouter(prefix="/pay/wechat", tags=["payments"])
+from app.db import get_db_tx
+from app.deps import get_current_user
+from app.schemas import PaymentPrepayCreate, PaymentOut
+from app.services import payments as pay_service
+from app.services import orders as order_service
+from app.models import User, Order
 
-@router.post("/notify", response_model=NotifyResult)
-async def notify(req: Request, db: Session = Depends(get_db)):
+router = APIRouter(prefix="/payments", tags=["payments"])
+
+
+@router.post("/prepay", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
+def create_prepay(
+    body: PaymentPrepayCreate,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+) -> PaymentOut:
     """
-    微信支付回调的最小示例：为便于本地联调，我们用一个“共享口令”校验代替签名验真。
-    生产环境请替换为 v3 的回调签名验真流程。
+    创建预支付记录（开发态）：
+    - order 必须属于当前用户，且状态为 CREATED
+    - channel: WECHAT_JSAPI / WECHAT_NATIVE
+    - 返回预支付参数（开发态生成一个占位 prepay_id）
     """
-    token = req.headers.get("X-Notify-Token")
-    if token != settings.WECHAT_NOTIFY_TOKEN:
-        raise HTTPException(401, "invalid notify token")
-
-    body = await req.json()
-    # body 示例：{ "order_id": 123, "status": "SUCCESS", "transaction_id": "...", "amount": 1999 }
-    order_id = int(body.get("order_id", 0))
-    status = str(body.get("status", ""))
-    order = db.get(models.Order, order_id)
+    # 验证订单归属与状态
+    order: Order | None = order_service.get_order_by_id_for_user(
+        db, user=current_user, order_id=body.order_id
+    )
     if not order:
-        raise HTTPException(404, "order not found")
-    if status == "SUCCESS":
-        # 记录支付单
-        pay = db.query(models.PaymentWeChat).filter_by(order_id=order.id).first()
-        if pay:
-            pay.status = "success"
-            pay.transaction_id = body.get("transaction_id")
-            pay.raw_callback_json = json.dumps(body, ensure_ascii=False)
-            db.add(pay); db.commit()
-        mark_paid_and_grant(db, order)
-        return NotifyResult(ok=True)
-    return NotifyResult(ok=False)
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+    if order.status != "CREATED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Order status must be CREATED, got {order.status}",
+        )
+
+    try:
+        payment = pay_service.create_prepay(
+            db, order=order, channel=body.channel.value
+        )
+        return payment
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
