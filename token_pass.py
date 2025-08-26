@@ -1,0 +1,5 @@
+from app.security import decode_token
+
+
+t = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiaWF0IjoxNzU2MTg5Nzg1LCJleHAiOjE3NTY3OTQ1ODUsImp0aSI6IjYzODZhYmU2YWZkZTQ5MWNhNjcyNGY3ZWFlOWM1YzZiIiwiaXNfYWRtaW4iOmZhbHNlfQ.YZLE1fEa8PBG6Fuj_syCdNe4a4h70W00Q9KqmcLe6FM"
+print("token: ", decode_token(t))

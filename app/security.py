@@ -86,7 +86,7 @@ def decode_token(token: str) -> Dict[str, Any]:
             SECRET_KEY,
             algorithms=[ALGORITHM],
             options={"verify_aud": False},  # 默认不校验 aud
-            leeway=CLOCK_SKEW_LEEWAY_SECONDS,
+            # leeway=CLOCK_SKEW_LEEWAY_SECONDS,
         )
         return payload
     except JWTError as e:

@@ -147,7 +147,7 @@ class ProductOut(ProductBase):
 # =========================
 class OrderCreate(BaseModel):
     # 业务侧下单通常用 product_code，更稳；也可另做 OrderCreateById
-    product_code: str
+    product_code: Optional[str] = None
 
 
 class OrderOut(BaseModel):
