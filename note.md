@@ -296,7 +296,27 @@ API_V3_KEY 必须 32 字节；建议在应用启动时做一次长度校验（�
 
 webhooks.py 里返回 (dict, status) 的 tuple FastAPI 是接受的；为一致性也可用 JSONResponse（非必须）。
 
+# 20250830 测试问题
 
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiaWF0IjoxNzU2MTg5MTgyLCJleHAiOjE3NTY3OTM5ODIsImp0aSI6Ijk2YTQ4MWM1ZGIzNTQyZjZiZjdhOWY5N2UwZDQzZGJlIiwiaXNfYWRtaW4iOmZhbHNlfQ.ZcE2IkgyiKrmV45epjRrPlUeB_x_VuMBY4y76vtOxW8
+1. 选择时间和手打时间有误差
+2. 现在排盘传参应该有问题，排盘结果不准了
+3. 输出文本内容过多会断，比如大运十年流年，输出到8就断了
+4. 网页版优化：配色选米黄和红色搭配，等待过程插入命理知识和历史名人典故（输出事在人为的核心价值观，杜绝封建迷信/重要），输出时间优化（对标元器）
+5. 小程序版本（参考PDF）：首页选择界面（时间性别地点），此页展示八字
+6. （五行展示有颜色区分，横标年月日时，纵标天干地支）+大运
+7. 加上快捷按钮（对话框只显示按钮分析，不显示具体的promote，比如选择“性格特征”，对话框显示"性格特征分析"）：
+性格特征：用子平和盲派深度分析人物性格优势（PS之前测过，用户反馈最好只说好的，语言艺术）
+人物画像：用子平和盲派深度分析人物画像身高体型气质动作等等
+正缘人物画像：用子平和盲派深度分析正缘人物画像
+事业建议：结合大运流年，用子平和盲派深度分析事业方向和可执行的建议（需引导用户加上当前背景）
+财运分析：结合大运流年，用子平和盲派深度分析财运吉凶
+健康分析：结合大运流年，用子平和盲派深度分析健康建议
+正缘应期：结合大运流年，用子平和盲派深度分析哪个流年应期概率最高（需要引导客户补充背景，当前单身/有对象，已婚/离异）
+大运流年：用子平和盲派深度分析XX大运流年每年吉凶（事业爱情财运健康）——这个要客户选择哪个十年大运，每次单独算
 
-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiaWF0IjoxNzU2MTg5NTUxLCJleHAiOjE3NTY3OTQzNTEsImp0aSI6IjRiMTc1MWM4NzgwNTQ3ZTI4NjUzY2E1M2ZmODU2ZTQzIiwiaXNfYWRtaW4iOmZhbHNlfQ.ie8AwYiV7WdFGHUefpaX1lbYQDfCzh68duqTzyCnYwM
+
+
+"你好呀～（微笑）\n" +
+"我不是来剧透你人生的编剧，只是帮你找找藏在命盘里的小彩蛋——可能是你还没发现的潜力，或是未来路上悄悄亮起的路灯（✨）\n" +
+"毕竟你才是人生的主角，我嘛…只是个带地图的导游～（轻松摊手）\n" +
+"准备好一起逛逛你的‘人生剧本杀’了吗？放心，不用怕泄露天机，我今天的‘仙气’储备充足！"
