@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Order, Payment
+# from app.models import Order, Payment
 
 
 # ---------- 读取 ----------

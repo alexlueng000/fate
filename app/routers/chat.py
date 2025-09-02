@@ -101,7 +101,7 @@ def build_full_system_prompt(mingpan: Dict[str, Any], kb_passages: List[str]) ->
         kb_block = "\n\n".join(kb_passages[:3])  # 控制长度，最多取3段
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
     composed = _append_md_rules(composed)
-    print("最终的提示词: ", composed)
+    # print("最终的提示词: ", composed)
     return composed
 
 # ====== 调用 DeepSeek（一次性）======
@@ -231,6 +231,8 @@ def chat_start(req: ChatStartReq, request: Request, db: Session = Depends(get_db
     if opening_kb_passages:
         kb_block = "\n\n".join(opening_kb_passages)
         composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+
+    print("最终的提示词: ", composed)
 
     messages = [
         {"role": "system", "content": composed},

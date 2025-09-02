@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Order, Product, User
+# from app.models import Order, Product, User
 from app.services.products import get_by_code
 from app.config import settings
 

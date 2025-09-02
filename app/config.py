@@ -1,7 +1,12 @@
 # app/config.py
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from typing import List, Optional
+
+from dotenv import load_dotenv
+load_dotenv()
 
 
 class Settings(BaseSettings):

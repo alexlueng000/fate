@@ -6,7 +6,7 @@ from typing import Optional, List
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from app.models import Product
+# from app.models import Product
 
 
 def list_products(

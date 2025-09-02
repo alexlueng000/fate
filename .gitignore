@@ -29,3 +29,7 @@ app.db-shm
 app.db-wal
 
 token.py
+
+migrations/
+alembic.ini
+alembic/
