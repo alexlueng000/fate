@@ -14,7 +14,7 @@ from app.services.users import (
     touch_last_login,
 )
 from app.deps import get_current_user
-from app.models import User
+from app.models.User import User
 from app.config import settings
 
 router = APIRouter(tags=["auth", "users"])
