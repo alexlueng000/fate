@@ -27,6 +27,7 @@ class User(Base):
     用户主表（统一账户）
     - 既支持 Web（邮箱/密码/验证码）也支持小程序（微信 openid）登录的统一“人”。
     - openid 建议迁移到 user_identities 表，这里保留为可空字段以兼容历史逻辑。
+    --- 
     """
     __tablename__ = "users"
 
