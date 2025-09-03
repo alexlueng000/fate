@@ -11,7 +11,7 @@ from lunar_python.eightchar import Yun
 from sqlalchemy.orm import Session
 from ..db import get_db
 # from ..security import get_current_user
-from ..schemas import BaziComputeRequest, BaziComputeResponse
+from ..schemas_old import BaziComputeRequest, BaziComputeResponse
 from ..services.bazi import compute_bazi_demo, bazi_fingerprint
 from .. import models
 from ..utils import geo_amap

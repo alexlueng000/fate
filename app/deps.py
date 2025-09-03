@@ -13,6 +13,9 @@ from app.db import get_db
 from app import models
 from app.config import settings
 
+from fastapi import Depends, Request, HTTPException, status
+from jose import JWTError
+
 
 # 让 Swagger “Authorize” 按钮可用；虽不必真的走 /auth/login 表单流，但可复用取 token 的机制
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
@@ -100,3 +103,42 @@ async def get_admin_user(
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin privilege required")
     return current_user
+
+
+def _extract_bearer_token(request: Request) -> str:
+    auth_header = request.headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
+    return auth_header.split(" ", 1)[1].strip()
+
+def get_current_user_or_401(request: Request) -> int:
+    """
+    返回 user_id（int）。只做 token 解码，不访问数据库。
+    """
+    token = _extract_bearer_token(request)
+    try:
+        payload = decode_token(token)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token 无效或已过期")
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token 缺少用户标识")
+    try:
+        return int(sub)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token 用户标识非法")
+
+def get_current_user_obj_or_401(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> User:
+    """
+    返回完整 User 对象；会查询数据库并校验用户存在/状态。
+    """
+    user_id = get_current_user_or_401(request)
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已被删除")
+    # 如果有“禁用/冻结”字段，在这里加校验
+    # if user.is_disabled: raise HTTPException(403, "账号已禁用")
+    return user

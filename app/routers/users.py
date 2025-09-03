@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db_tx
-from app.schemas import Token, UserOut  # 复用你现有的响应模型
+# from app.schemas import Token, UserOut  # 复用你现有的响应模型
 from app.security import create_access_token, hash_password, verify_password
 from app.services.users import (
     get_or_create_by_openid,
