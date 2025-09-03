@@ -46,6 +46,9 @@ async def get_current_user(
     - 若没有，再从原始 Authorization 头里取
     - 成功解析后用 payload['sub'] 查询用户
     """
+
+    print("token_from_swagger:", token_from_swagger)
+
     token = token_from_swagger or _extract_bearer_token(request)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")

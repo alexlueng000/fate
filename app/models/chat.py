@@ -28,14 +28,14 @@ class Conversation(Base):
 
     # 与 MySQL BIGINT UNSIGNED 对齐
     id: Mapped[int] = mapped_column(
-        mysql.BIGINT(unsigned=True),
+        Integer,
         primary_key=True,
         autoincrement=True,
         nullable=False,
     )
 
     user_id: Mapped[int] = mapped_column(
-        mysql.BIGINT(unsigned=True),
+        Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
@@ -80,21 +80,21 @@ class Message(Base):
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(
-        mysql.BIGINT(unsigned=True),
+        Integer,
         primary_key=True,
         autoincrement=True,
         nullable=False,
     )
 
     conversation_id: Mapped[int] = mapped_column(
-        mysql.BIGINT(unsigned=True),
+        Integer,
         ForeignKey("conversations.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
 
     user_id: Mapped[int] = mapped_column(
-        mysql.BIGINT(unsigned=True),
+        Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,

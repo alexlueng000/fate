@@ -68,7 +68,7 @@ def seed_products() -> None:
 def main() -> None:
     create_tables()
     # 如不想自动灌入数据，注释掉下一行即可
-    seed_products()
+    # seed_products()
 
 
 if __name__ == "__main__":
