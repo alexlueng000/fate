@@ -1,14 +1,14 @@
 # app/services/users.py
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models.User import User
+from app.models.user import User
 
 
 # ========== 工具函数 ==========
@@ -134,6 +134,7 @@ def create_user_email_password(
     db: Session,
     *,
     email: str,
+    username: str,
     password_hash: str,
     nickname: Optional[str] = None,
     avatar_url: Optional[str] = None,
@@ -152,6 +153,7 @@ def create_user_email_password(
 
     user = User(
         email=e,
+        username=username,
         password_hash=password_hash,
         nickname=nickname,
         avatar_url=avatar_url,
@@ -247,7 +249,7 @@ def touch_last_login(
     更新最近登录时间与IP（不在此函数 commit）。
     - 建议在登录成功/刷新令牌成功时调用。
     """
-    user.last_login_at = datetime.now(datetime.timezone.utc)  # 模型列允许为 naive；与 DB func.now() 不冲突
+    user.last_login_at = datetime.now(timezone.utc)  # 模型列允许为 naive；与 DB func.now() 不冲突
     if ip:  
         user.last_login_ip = ip[:45]  # 兼容 IPv6 最大长度
     db.flush()

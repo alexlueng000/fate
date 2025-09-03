@@ -14,7 +14,7 @@ from app.services.users import (
     touch_last_login,
 )
 from app.deps import get_current_user
-from app.models.User import User
+from app.models.user import User
 from app.config import settings
 
 router = APIRouter(tags=["auth", "users"])
@@ -30,6 +30,7 @@ from pydantic import BaseModel, EmailStr, Field
 class WebRegisterRequest(BaseModel):
     """Web 注册：邮箱 + 密码 + 昵称(可选) + 头像(可选)"""
     email: EmailStr = Field(..., description="邮箱（唯一）")
+    username: str = Field(..., description="用户名（唯一）")
     password: str = Field(..., min_length=6, max_length=128, description="明文密码（后台会做哈希）")
     nickname: str | None = Field(None, max_length=64, description="昵称（可选）")
     avatar_url: str | None = Field(None, max_length=256, description="头像URL（可选）")
@@ -52,11 +53,24 @@ class MpLoginRequest(BaseModel):
     nickname: str | None = Field(None, max_length=64, description="昵称（可选）")
     avatar_url: str | None = Field(None, max_length=256, description="头像URL（可选）")
 
+class UserOut(BaseModel):
+    id: int
+    email: str | None = None
+    username: str
+    nickname: str | None = None
+    avatar_url: str | None = None
+    is_admin: bool
+
+# 登录，注册返回 
+class AuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
 
 # ================================== Web 账户：注册 / 登录 ==================================
 
-@router.post("/auth/web/register", response_model=Token)
-def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) -> Token:
+@router.post("/auth/web/register", response_model=AuthResponse)
+def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
     """
     Web 注册（邮箱+密码）：
     - 校验邮箱唯一；密码在路由层进行哈希（推荐 Argon2id/bcrypt），再写入数据库。
@@ -74,6 +88,7 @@ def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) 
     user = create_user_email_password(
         db,
         email=str(payload.email),
+        username=str(payload.username),
         password_hash=pwd_hash,
         nickname=payload.nickname,
         avatar_url=payload.avatar_url,
@@ -87,11 +102,14 @@ def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) 
     # 5) 签发 JWT（与你现有逻辑保持一致）
     token = create_access_token(user.id, extra={"is_admin": user.is_admin})
 
-    return Token(access_token=token)
+    return AuthResponse(
+        access_token=token,
+        user=UserOut.model_validate(user.__dict__)
+    )
 
 
-@router.post("/auth/web/login", response_model=Token)
-def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> Token:
+@router.post("/auth/web/login", response_model=AuthResponse)
+def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
     """
     Web 登录（邮箱+密码）：
     - 验证邮箱存在与密码匹配；状态为 blocked/deleted 的用户拒绝登录。
@@ -102,7 +120,7 @@ def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> Tok
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
 
     # 账户状态检查（若你启用了 status 字段）
-    if getattr(user, "status", "active") != "active":
+    if getattr(user, "status", 1) != 1:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账户不可用")
 
     if not verify_password(payload.password, user.password_hash):
@@ -112,13 +130,16 @@ def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> Tok
     touch_last_login(db, user)
 
     token = create_access_token(user.id, extra={"is_admin": user.is_admin})
-    return Token(access_token=token)
+    return AuthResponse(
+        access_token=token,
+        user=UserOut.model_validate(user.__dict__)
+    )
 
 
 # ================================== 小程序：登录（开发态兼容版） ==================================
 
-@router.post("/auth/mp/login", response_model=Token)
-def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> Token:
+@router.post("/auth/mp/login", response_model=AuthResponse)
+def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
     """
     小程序登录（兼容直登与开发态）：
     - 有 openid → 幂等获取/创建。
@@ -156,13 +177,16 @@ def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> Token
 
     # 4) 签发 Token
     token = create_access_token(user.id, extra={"is_admin": user.is_admin})
-    return Token(access_token=token)
+    return AuthResponse(
+        access_token=token,
+        user=UserOut.model_validate(user.__dict__)
+    )
 
 
 # ================================== 兼容旧接口（保留原 /auth/login） ==================================
 
-@router.post("/auth/login", response_model=Token, deprecated=True)
-def login_compat(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> Token:
+@router.post("/auth/login", response_model=AuthResponse, deprecated=True)
+def login_compat(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
     """
     兼容旧接口：保留原 /auth/login 行为（openid 或 js_code=dev）。
     建议前端逐步迁移到：

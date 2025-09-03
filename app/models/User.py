@@ -10,6 +10,8 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     Index,
+    SmallInteger,
+    text,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -59,6 +61,13 @@ class User(Base):
         comment="邮箱（Web 登录/通知）；可空；唯一约束见 uq_users_email"
     )
 
+    username: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="用户名（Web 登录/通知）；可空；唯一约束见 uq_users_username"
+    )
+
     phone: Mapped[Optional[str]] = mapped_column(
         String(32),
         nullable=True,
@@ -87,19 +96,15 @@ class User(Base):
 
     # === 权限/状态 ===
     is_admin: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        server_default="0",
-        nullable=False,
-        comment="是否为管理员；历史沿用。后续可考虑用 role 字段替代"
+        Boolean, default=False, server_default=text("0"), nullable=False
     )
 
-    status: Mapped[str] = mapped_column(
-        String(16),
-        default="active",
-        server_default="active",
+    status: Mapped[int] = mapped_column(
+        SmallInteger,
+        default=1,                  # 1=active, 0=blocked, 2=deleted (例)
+        server_default=text("1"),
         nullable=False,
-        comment="账户状态：active / blocked / deleted 等"
+        comment="账户状态：1=active, 0=blocked, 2=deleted",
     )
 
     # 用户来源（统计/策略用，不影响鉴权逻辑）
@@ -144,19 +149,19 @@ class User(Base):
     )
 
     # === 关联关系（便于反查） ===
-    orders: Mapped[List["Order"]] = relationship(
-        back_populates="user",
-        cascade="all,delete-orphan",
-        passive_deletes=True,
-        doc="用户的订单列表"
-    )
+    # orders: Mapped[List["Order"]] = relationship(
+    #     back_populates="user",
+    #     cascade="all,delete-orphan",
+    #     passive_deletes=True,
+    #     doc="用户的订单列表"
+    # )
 
-    entitlements: Mapped[List["Entitlement"]] = relationship(
-        back_populates="user",
-        cascade="all,delete-orphan",
-        passive_deletes=True,
-        doc="用户的权益/订阅记录列表"
-    )
+    # entitlements: Mapped[List["Entitlement"]] = relationship(
+    #     back_populates="user",
+    #     cascade="all,delete-orphan",
+    #     passive_deletes=True,
+    #     doc="用户的权益/订阅记录列表"
+    # )
 
     # 如果你有独立的第三方身份表，建议开启这段关系
     # identities: Mapped[List["UserIdentity"]] = relationship(
