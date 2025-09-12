@@ -30,17 +30,20 @@ def create_app() -> FastAPI:
     )
 
     # 已有业务
-    app.include_router(chat.router)
-    app.include_router(bazi.router)
+    app.include_router(chat.router, prefix="/api", tags=["chat"])
+    app.include_router(bazi.router, prefix="/api", tags=["bazi"])
 
     # 新增/本阶段完成的业务
-    app.include_router(users.router)         # /auth/login, /me
-    app.include_router(chat_basic.router)
-#    app.include_router(products.router)      # /products/default, /products/{code}
-#    app.include_router(orders.router)        # /orders, /orders/my, /orders/{id}
-#    app.include_router(payments.router)      # /payments/prepay
-#    app.include_router(webhooks.router)      # /webhooks/wechatpay
-#    app.include_router(entitlements.router)  # /entitlements/my, /entitlements/{code}
+    app.include_router(users.router, prefix="/api", tags=["auth"])  # /api/auth/login, /api/auth/me
+    app.include_router(chat_basic.router, prefix="/api", tags=["chat_basic"])
+
+    # 未来业务（保留）
+    # app.include_router(products.router, prefix="/api/products", tags=["products"])
+    # app.include_router(orders.router, prefix="/api/orders", tags=["orders"])
+    # app.include_router(payments.router, prefix="/api/payments", tags=["payments"])
+    # app.include_router(webhooks.router, prefix="/api/webhooks", tags=["webhooks"])
+    # app.include_router(entitlements.router, prefix="/api/entitlements", tags=["entitlements"])
+
 
     @app.get("/")
     def ping():
