@@ -23,6 +23,8 @@ def create_app() -> FastAPI:
             "http://localhost:3000",
             "http://127.0.0.1:3000",
             "https://yizhanmaster.site",
+            "http://43.139.4.252:3000",
+            "http://43.139.4.252"
         ],
         allow_credentials=True,
         allow_methods=["*"],
