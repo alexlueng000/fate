@@ -332,3 +332,50 @@ Day 3 – 用户注册 / 登录（P0） 后端：JWT 认证、注册登录接口
  Day 4 – 新功能（高优先级用户体验） 快捷按钮（对话入口） 聊天输入框上方增加 7 个按钮（性格特征、人物画像、正缘人物画像、事业建议、财运分析、健康分析、正缘应期）。 按钮点击后 → 聊天区展示固定消息，如“性格特征分析”。 后端根据按钮类型拼接 prompt，前端不显示原始 prompt。 大运流年分析 快捷按钮中“大运流年” → 弹出选择某个十年大运 → 单独生成。 命盘展示优化 Web：五行用颜色区分；四柱表格：横轴 年月日时，纵轴 天干地支。 大运展示：卡片式 UI。 
  
  Day 5 – Web 视觉优化 + 小程序首页 Web 视觉优化 配色：米黄+红（主色：#fef3c7 / #dc2626），整体改为温润东方风格。 Loading 状态：不再是单纯转圈 → 插入命理知识/历史名人典故（核心价值观导向，不涉迷信）。 文案改造：输出过程引导性强，避免“算命”腔。 小程序首页 首页选择：时间、性别、地点。 点击“排盘” → 展示八字（四柱+大运+五行）。 聊天入口按钮。 UI 对照 PDF 原型，先做静态 demo，保证能跑通。
+
+
+
+ # 80 一律跳 443
+server {
+    listen 80;
+    server_name yizhanmaster.site www.yizhanmaster.site;
+    return 301 https://yizhanmaster.site$request_uri;
+}
+
+# 生产站点
+server {
+    listen 443 ssl http2;
+    server_name yizhanmaster.site;
+
+    ssl_certificate     /etc/letsencrypt/live/yizhanmaster.site/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yizhanmaster.site/privkey.pem;
+    ssl_stapling on;
+    ssl_stapling_verify on;
+
+    # Next.js 前端（next start 在 127.0.0.1:3000）
+    location / {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_pass http://127.0.0.1:3000/;   # ← 别写成域名
+    }
+
+    # 后端 API（FastAPI 在 127.0.0.1:9009）
+    location /api/ {
+        proxy_http_version 1.1;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_pass http://127.0.0.1:8000/;   # ← 别写成域名
+    }
+}
