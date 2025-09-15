@@ -231,9 +231,6 @@ def handler(args: Args[Input]) -> Output:
         raise Exception(f"排盘插件执行失败: {e}")
 
 
-zsh: event not found: Passw0rd
-
-
 docker run -d \
   --name mysql8.4 \
   -p 127.0.0.1:3306:3306 \

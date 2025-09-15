@@ -46,3 +46,30 @@ class HistoryResp(BaseModel):
     size: int
     total: int
     items: List[MessageItem]
+
+
+# === 排盘 ===
+class PaipanPayload(BaseModel):
+    four_pillars: Dict[str, List[str]]
+    dayun: List[Dict[str, Any]]
+
+class ChatStartReq(BaseModel):
+    paipan: PaipanPayload
+    kb_index_dir: Optional[str] = None
+    kb_topk: int = 0
+    note: Optional[str] = None
+
+class ChatStartResp(BaseModel):
+    conversation_id: str
+    reply: str
+
+class ChatSendReq(BaseModel):
+    conversation_id: str = Field(..., description="由 /chat/start 返回")
+    message: str
+
+class ChatSendResp(BaseModel):
+    conversation_id: str
+    reply: str
+
+class ChatRegenerateReq(BaseModel):
+    conversation_id: str = Field(..., description="目标会话ID")
