@@ -11,6 +11,9 @@ _RE_STRUCTURAL = re.compile(r"^\s*(?:[-*+]\s|\d+\.\s|#{1,6}\s|>|\||```|</?)")
 
 _TAIL_TOKENS = {"点", "析", "览", ")", "）", "]", "】", "?", "？", "!", "！", ":", "：", "—"}
 
+# === 新增：确保标题块前后都有空行（硬性切断上一段） ===
+_HEADING_LINE = re.compile(r"^[ \t]{0,3}#{1,6}[ \t]+\S.*$", re.M)
+
 def _extract_placeholders(s: str, regex: re.Pattern, tag: str) -> Tuple[str, list[str]]:
     store: List[str] = []
     def _repl(m):
@@ -36,6 +39,40 @@ def _paren_balance(text: str) -> int:
             else:
                 return -1
     return len(stack)
+
+def _ensure_heading_blocks(s: str) -> str:
+    """
+    把所有标题行强制变成一个“独立块”：
+    - 标题行前：若不是文首且前一行不是空行，补一个空行
+    - 标题行后：若下一行不是空行，补一个空行
+    这样 ReactMarkdown/marked 等解析器一定会把它当作标题，而不是普通段落里的文字。
+    """
+    lines = s.split("\n")
+    n = len(lines)
+    i = 0
+    out: list[str] = []
+    while i < n:
+        ln = lines[i]
+        if _HEADING_LINE.match(ln):
+            # 确保前一行空行
+            if out and out[-1].strip() != "":
+                out.append("")  # 插入空行
+            out.append(ln.rstrip())
+            out.append("<br/>")  # ← 复刻你说的那版
+            # 然后再判断是否需要空行
+            nxt = lines[i+1] if i+1 < n else None
+            if nxt is not None and nxt.strip() != "":
+                out.append("")
+            elif nxt is None:
+                out.append("")
+            i += 1
+            continue
+        out.append(ln)
+        i += 1
+    # 折叠 3 个以上的空行
+    s2 = "\n".join(out)
+    s2 = re.sub(r"\n{3,}", "\n\n", s2)
+    return s2
 
 def normalize_markdown(md: str) -> str:
     """
@@ -92,8 +129,14 @@ def normalize_markdown(md: str) -> str:
     s = "\n".join(out)
     s = re.sub(r"\n{3,}", "\n\n", s)
 
+    # 这里替换  \n<br/>\n\n 以及常见等价写法为一个空格
+    s = re.sub(r"(?:\r?\n)?<br\s*/?>\s*\r?\n\r?\n", " ", s)
+
     # 还原代码
     s = _restore_placeholders(s, inline,  "I")
     s = _restore_placeholders(s, fenced, "F")
+
+    # === 新增：标题块强制换行 ===
+    s = _ensure_heading_blocks(s)
 
     return s.strip()

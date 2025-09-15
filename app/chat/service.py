@@ -1,5 +1,6 @@
 # app/chat/service.py
 import os
+import re
 import uuid
 import json
 from typing import List, Dict, Any, Iterator, Optional
@@ -17,6 +18,28 @@ from .sse import should_stream, sse_pack, sse_response
 from .store import get_conv, set_conv, append_history
 
 DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
+
+# 只清理形如  \n<br/>\n\n / \r\n<br />\r\n\r\n 的块；大小写不敏感
+# _BR_BLOCK = re.compile(r"(?:\r?\n)?<br\s*/?>\s*\r?\n\r?\n", re.IGNORECASE)
+_BR_BLOCK = re.compile(r"(?:\r?\n)?<br\s*/?>\s*(?:\r?\n){2}", re.IGNORECASE)
+
+# 将替换目标从 " " 改为 "\n"
+_BR_REPLACEMENT = "\n- "   # 若要空一行就用 "\n\n"
+
+def _scrub_br_block(s: str) -> str:
+    return _BR_BLOCK.sub(_BR_REPLACEMENT, s)
+
+
+# 把所有 2+ 个连续换行压成 1 个换行：\n\n -> \n（兼容 \r\n）
+_MULTI_NL = re.compile(r"(?:\r?\n){2,}")
+
+def _collapse_double_newlines(s: str) -> str:
+    return _MULTI_NL.sub("\n", s)
+
+def _third_sub(s: str) -> str:
+    return s.replace("\n- -", "\n-")
+
+
 
 def _append_md_rules(prompt: str) -> str:
     rules = (
@@ -92,18 +115,27 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
                         continue
                     full.append(delta)
                     clean = normalize_markdown("".join(full))
+                    clean = _scrub_br_block(clean)              # ← 新增兜底替换
+                    clean = _collapse_double_newlines(clean)     # ← 新增：把 \n\n 压成 \n
+                    clean = _third_sub(clean)                    # ← 新增：把 \n\n 压成 \n
                     yield sse_pack(json.dumps({"text": clean, "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
             except Exception as e:
                 yield sse_pack(f"[ERROR]{str(e)}")
             finally:
                 final = normalize_markdown("".join(full)).strip()
+                final = _scrub_br_block(final)                 # ← 新增兜底保存
+                final = _collapse_double_newlines(final)        # ← 新增：把 \n\n 压成 \n
+                final = _third_sub(final)                        # ← 新增：把 \n\n 压成 \n
                 append_history(cid, "user", opening_user_msg)
                 append_history(cid, "assistant", final)
         return sse_response(gen)
 
     # 一次性
     reply = normalize_markdown(call_deepseek(messages)).strip()
+    reply = _scrub_br_block(reply)                             # ← 新增兜底替换
+    reply = _collapse_double_newlines(reply)                    # ← 新增：把 \n\n 压成 \n
+    reply = _third_sub(reply)                                  # ← 新增：把 \n\n 压成 \n
     append_history(cid, "user", opening_user_msg)
     append_history(cid, "assistant", reply)
     return cid, reply
