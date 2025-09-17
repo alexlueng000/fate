@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # Database (MySQL)
     # -----------------------------
     # 建议用 mysql+pymysql://user:pass@host:3306/dbname
-    database_url: str = "mysql+pymysql://root:123456@127.0.0.1:3306/fate"
+    database_url: str = "mysql+pymysql://fate_app:Turkey414@43.139.4.252:3306/fate"
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_recycle: int = 3600    # 秒；1小时回收
