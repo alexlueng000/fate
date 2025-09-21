@@ -74,6 +74,17 @@ def _ensure_heading_blocks(s: str) -> str:
     s2 = re.sub(r"\n{3,}", "\n\n", s2)
     return s2
 
+# 行首的 ###/####... 去掉（保留原缩进与换行）
+_HEADING_HASHES = re.compile(r"(?m)^(\s*)#{1,6}\s+")
+def _strip_heading_hashes(s: str) -> str:
+    return _HEADING_HASHES.sub(r"\1", s)
+
+# 冒号后紧跟列表时，确保有一个空行：把 "：\n- " / ":\n- " 变成 "：\n\n- "
+_COLON_LIST = re.compile(r"([：:])\s*(?:\r?\n)(?=\s*-\s+\S)")
+def _ensure_blankline_before_list_after_colon(s: str) -> str:
+    return _COLON_LIST.sub(r"\1\n\n", s)
+
+
 def normalize_markdown(md: str) -> str:
     """
     - 统一换行/去零宽
@@ -137,6 +148,7 @@ def normalize_markdown(md: str) -> str:
     s = _restore_placeholders(s, fenced, "F")
 
     # === 新增：标题块强制换行 ===
+    # s = _ensure_blankline_before_list_after_colon(s)
     s = _ensure_heading_blocks(s)
 
     return s.strip()
