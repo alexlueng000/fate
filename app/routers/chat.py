@@ -7,9 +7,9 @@ from ..db import get_db
 from app.schemas.chat import (
     ChatStartReq, ChatStartResp,
     ChatSendReq, ChatSendResp,
-    ChatRegenerateReq
+    ChatRegenerateReq, ChatClearReq, ChatOkResp
 )
-from app.chat.service import start_chat, send_chat, regenerate
+from app.chat.service import start_chat, send_chat, regenerate, clear
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -58,3 +58,15 @@ def chat_regenerate(req: ChatRegenerateReq, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
     return ChatSendResp(conversation_id=req.conversation_id, reply=reply)
+
+
+@router.post("/clear", response_model=ChatOkResp)
+def chat_clear(req: ChatClearReq, db: Session = Depends(get_db)):
+    """
+    清空指定会话的历史记录
+    """
+    try:
+        clear(req.conversation_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
+    return ChatOkResp(ok=True, conversation_id=req.conversation_id)

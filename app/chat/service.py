@@ -15,7 +15,7 @@ from .markdown_utils import normalize_markdown
 from .rag import retrieve_kb
 from .deepseek_client import call_deepseek, call_deepseek_stream
 from .sse import should_stream, sse_pack, sse_response
-from .store import get_conv, set_conv, append_history
+from .store import get_conv, set_conv, append_history, clear_history
 
 DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
 
@@ -141,10 +141,12 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
     return cid, reply
 
 def send_chat(conversation_id: str, message: str, request: Request):
+
     conv = get_conv(conversation_id)
     if not conv:
         raise ValueError("会话不存在，请先 /chat/start")
 
+    # 查找本地知识库 
     kb_dir = conv.get("kb_index_dir")
     kb_passages: List[str] = []
     if kb_dir and os.path.exists(os.path.join(kb_dir, "chunks.json")):
@@ -163,6 +165,7 @@ def send_chat(conversation_id: str, message: str, request: Request):
     messages.extend(conv["history"][-recentN:])
     messages.append({"role": "user", "content": message})
 
+    # 流式
     if should_stream(request):
         def gen() -> Iterator[bytes]:
             full: List[str] = []
@@ -173,17 +176,27 @@ def send_chat(conversation_id: str, message: str, request: Request):
                         continue
                     full.append(delta)
                     clean = normalize_markdown("".join(full))
+                    clean = _scrub_br_block(clean)              # ← 新增兜底替换
+                    clean = _collapse_double_newlines(clean)     # ← 新增：把 \n\n 压成 \n
+                    clean = _third_sub(clean)                    # ← 新增：把 \n\n 压成 \n
                     yield sse_pack(json.dumps({"text": clean, "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
             except Exception as e:
                 yield sse_pack(f"[ERROR]{str(e)}")
             finally:
                 final = normalize_markdown("".join(full)).strip()
+                final = _scrub_br_block(final)                 # ← 新增兜底保存
+                final = _collapse_double_newlines(final)        # ← 新增：把 \n\n 压成 \n
+                final = _third_sub(final)                        # ← 新增：把 \n\n 压成 \n
                 append_history(conversation_id, "user", message)
                 append_history(conversation_id, "assistant", final)
         return sse_response(gen)
 
-    reply = normalize_markdown(call_deepseek(messages))
+    # 一次性
+    reply = normalize_markdown(call_deepseek(messages)).strip()
+    reply = _scrub_br_block(reply)                             # ← 新增兜底替换
+    reply = _collapse_double_newlines(reply)                    # ← 新增：把 \n\n 压成 \n
+    reply = _third_sub(reply)                                  # ← 新增：把 \n\n 压成 \n
     append_history(conversation_id, "user", message)
     append_history(conversation_id, "assistant", reply)
     return reply
@@ -230,3 +243,8 @@ def regenerate(conversation_id: str) -> str:
     reply = normalize_markdown(call_deepseek(messages))
     append_history(conversation_id, "assistant", reply)
     return reply
+
+
+def clear(conversation_id: str):
+    ok = clear_history(conversation_id, keep_pinned=True)
+    return {"ok": ok}

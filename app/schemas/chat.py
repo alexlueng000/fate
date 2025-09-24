@@ -73,3 +73,10 @@ class ChatSendResp(BaseModel):
 
 class ChatRegenerateReq(BaseModel):
     conversation_id: str = Field(..., description="目标会话ID")
+
+class ChatClearReq(BaseModel):
+    conversation_id: str = Field(..., description="目标会话ID")
+
+class ChatOkResp(BaseModel):
+    ok: bool
+    conversation_id: str
