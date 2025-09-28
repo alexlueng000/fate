@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models.user import User
+from app.utils.username import slugify_username
 
 
 # ========== 工具函数 ==========
@@ -110,6 +111,7 @@ def get_or_create_by_openid(
     user = User(
         openid=openid,
         nickname=nickname,
+        username=slugify_username(nickname),
         avatar_url=avatar_url,
         is_admin=bool(is_admin) if is_admin is not None else False,
         source=source,
