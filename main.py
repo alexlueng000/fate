@@ -50,11 +50,11 @@ def create_app() -> FastAPI:
     # app.include_router(entitlements.router, prefix="/api/entitlements", tags=["entitlements"])
 
 
-    @app.get("/")
+    @app.get("/api/ping")
     def ping():
         return {"ok": True, "app": settings.app_name}
 
-    @app.get("/healthz")
+    @app.get("/api/healthz")
     def healthz():
         return {"status": "ok"}
  
