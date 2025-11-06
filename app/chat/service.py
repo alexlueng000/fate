@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 import json
+import time
 from typing import List, Dict, Any, Iterator, Optional
 from contextlib import contextmanager
 
@@ -146,71 +147,192 @@ def build_full_system_prompt(base_prompt: str, mingpan: Dict[str, Any], kb_passa
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
     return _append_md_rules(composed)
 
+
+# ==================== 时间统计函数 ====================
+
+@contextmanager
+def _t(section: str, spans: Dict[str, float]):
+    s = time.perf_counter()
+    try:
+        yield
+    finally:
+        spans[section] = time.perf_counter() - s
+
+def _now_ms() -> int:
+    return int(time.time() * 1000)
+
+def _ms(spans: Dict[str, float]) -> Dict[str, int]:
+    # 秒 -> 毫秒并取整
+    return {k: int(v * 1000) for k, v in spans.items()}
+
+def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int, request: Request):
+    spans: Dict[str, float] = {}
+    t0 = _now_ms()
+
+    with _t("pre", spans):
+        # RAG for start
+        kb_passages: List[str] = []
+        if kb_topk:
+            kb_passages = retrieve_kb(
+                "开场上下文",
+                os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
+                k=min(3, kb_topk)
+            )
+
+        # 从 DB 读取最新的系统提示
+        base_prompt = _load_system_prompt_from_db()
+
+        composed = build_full_system_prompt(
+            base_prompt,
+            {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"]},
+            kb_passages
+        )
+
+        cid = f"conv_{uuid.uuid4().hex[:8]}"
+        set_conv(cid, {
+            "pinned": composed,
+            "history": [],
+            "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX)
+        })
+
+        opening_user_msg = (
+            "请基于以上命盘做一份通用且全面的解读，条理清晰，"
+            "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
+            "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
+        )
+
+        messages = [
+            {"role": "system", "content": composed},
+            {"role": "user", "content": opening_user_msg}
+        ]
+
+
 # ===================== 对话入口 =====================
 
 def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int, request: Request):
-    # RAG for start
-    kb_passages: List[str] = []
-    if kb_topk:
-        kb_passages = retrieve_kb("开场上下文", os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX), k=min(3, kb_topk))
+    spans: Dict[str, float] = {}
+    t0 = _now_ms()
 
-    # 从 DB 读取最新的系统提示
-    base_prompt = _load_system_prompt_from_db()
+    with _t("pre", spans):
+        # RAG for start
+        kb_passages: List[str] = []
+        if kb_topk:
+            kb_passages = retrieve_kb(
+                "开场上下文",
+                os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
+                k=min(3, kb_topk)
+            )
 
-    composed = build_full_system_prompt(
-        base_prompt,
-        {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"]},
-        kb_passages
-    )
+        # 从 DB 读取最新的系统提示
+        base_prompt = _load_system_prompt_from_db()
 
-    cid = f"conv_{uuid.uuid4().hex[:8]}"
-    set_conv(cid, {"pinned": composed, "history": [], "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX)})
+        composed = build_full_system_prompt(
+            base_prompt,
+            {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"]},
+            kb_passages
+        )
 
-    opening_user_msg = (
-        "请基于以上命盘做一份通用且全面的解读，条理清晰，"
-        "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
-        "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
-    )
+        cid = f"conv_{uuid.uuid4().hex[:8]}"
+        set_conv(cid, {
+            "pinned": composed,
+            "history": [],
+            "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX)
+        })
 
-    messages = [
-        {"role": "system", "content": composed},
-        {"role": "user", "content": opening_user_msg}
-    ]
+        opening_user_msg = (
+            "请基于以上命盘做一份通用且全面的解读，条理清晰，"
+            "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
+            "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
+        )
 
-    # 流式
+        messages = [
+            {"role": "system", "content": composed},
+            {"role": "user", "content": opening_user_msg}
+        ]
+
+    # —— 流式 —— #
     if should_stream(request):
         def gen() -> Iterator[bytes]:
+            nonlocal spans
             full: List[str] = []
+            first_byte_seen = False
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": cid}}, ensure_ascii=False))
+
+                # 统计 first_byte + streaming：首次拿到增量视为首字节到达
+                start_fb = time.perf_counter()
                 for delta in call_deepseek_stream(messages):
+                    if not first_byte_seen:
+                        spans["first_byte"] = time.perf_counter() - start_fb
+                        first_byte_seen = True
+
                     if not delta:
                         continue
                     full.append(delta)
+
+                    # 轻处理，避免把流“憋住”
                     clean = normalize_markdown("".join(full))
                     clean = _scrub_br_block(clean)
                     clean = _collapse_double_newlines(clean)
                     clean = _third_sub(clean)
+
                     yield sse_pack(json.dumps({"text": clean, "replace": True}, ensure_ascii=False))
+
+                # 若上游没有任何增量（极少见），也要补 first_byte
+                if not first_byte_seen:
+                    spans["first_byte"] = time.perf_counter() - start_fb
+
                 yield sse_pack("[DONE]")
+
             except Exception as e:
                 yield sse_pack(f"[ERROR]{str(e)}")
+
             finally:
-                final = normalize_markdown("".join(full)).strip()
-                final = _scrub_br_block(final)
-                final = _collapse_double_newlines(final)
-                final = _third_sub(final)
-                append_history(cid, "user", opening_user_msg)
-                append_history(cid, "assistant", final)
+                # streaming 时间 = 从 first_byte 记录点到 finally（包含最后一段处理）
+                if "first_byte" in spans:
+                    # first_byte 结束时刻是第一次 delta 的到达点，
+                    # 这里用 now - (start_fb + first_byte) 近似整个流式传输阶段
+                    spans["streaming"] = time.perf_counter() - start_fb - spans["first_byte"]
+
+                with _t("post", spans):
+                    final = normalize_markdown("".join(full)).strip()
+                    final = _scrub_br_block(final)
+                    final = _collapse_double_newlines(final)
+                    final = _third_sub(final)
+                    append_history(cid, "user", opening_user_msg)
+                    append_history(cid, "assistant", final)
+
+                # 打印结构化耗时
+                total_ms = _now_ms() - t0
+                print({
+                    "cid": cid,
+                    "phase_ms": _ms(spans),
+                    "t_total_ms": total_ms,
+                    "mode": "stream"
+                })
+
         return sse_response(gen)
 
-    # 一次性
-    reply = normalize_markdown(call_deepseek(messages)).strip()
-    reply = _scrub_br_block(reply)
-    reply = _collapse_double_newlines(reply)
-    reply = _third_sub(reply)
-    append_history(cid, "user", opening_user_msg)
-    append_history(cid, "assistant", reply)
+    # —— 一次性 —— #
+    with _t("first_byte", spans):   # 对一次性，把上游整体请求算作 first_byte（首包之前的等待）
+        reply_raw = call_deepseek(messages)
+
+    with _t("post", spans):
+        reply = normalize_markdown(reply_raw).strip()
+        reply = _scrub_br_block(reply)
+        reply = _collapse_double_newlines(reply)
+        reply = _third_sub(reply)
+        append_history(cid, "user", opening_user_msg)
+        append_history(cid, "assistant", reply)
+
+    total_ms = _now_ms() - t0
+    print({
+        "cid": cid,
+        "phase_ms": _ms(spans),
+        "t_total_ms": total_ms,
+        "mode": "oneshot"
+    })
+
     return cid, reply
 
 def send_chat(conversation_id: str, message: str, request: Request):

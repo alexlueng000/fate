@@ -24,7 +24,8 @@ def create_app() -> FastAPI:
             "http://127.0.0.1:3000",
             "https://yizhanmaster.site",
             "http://43.139.4.252:3000",
-            "http://43.139.4.252"
+            "http://43.139.4.252",
+            "https://api.fateinsight.site"
         ],
         allow_credentials=True,
         allow_methods=["*"],
