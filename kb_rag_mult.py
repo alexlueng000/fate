@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import os, json, argparse, numpy as np, glob
-from typing import List, Tuple, Dict
+import os, json, argparse, glob
+from typing import List, Dict, Optional
+import numpy as np
 
 # ====== 可选后端：Sentence-Transformers（优先）或 TF-IDF ======
 USE_ST = False
@@ -18,6 +19,8 @@ try:
     USE_TFIDF = True
 except Exception:
     USE_TFIDF = False
+
+TFIDF_MODEL_FILENAME = "tfidf_vectorizer.joblib"  # 持久化文件名
 
 # ====== 文档读取：.txt / .docx（可选 .doc via textract）======
 def read_txt(path: str) -> str:
@@ -66,26 +69,69 @@ def chunk_text(text: str, chunk_size: int = 700, overlap: int = 120) -> List[str
         i = end - overlap if end - overlap > i else end
     return chunks
 
-# ====== 向量后端（固定：索引用哪个，查询也用哪个）======
+# ====== 向量后端（索引/查询一致）======
 class EmbeddingBackend:
-    def __init__(self, force_backend: str | None = None):
+    """
+    - 当 force_backend == "st"：强制 ST
+    - 当 force_backend == "tfidf"：强制 TF-IDF
+    - 其他：优先 ST，失败则回退 TF-IDF（若可用）
+    - ST 模型路径优先：从 EMB_MODEL 读，如果是目录 → 直接加载本地目录；否则当作 repo_id
+    - 离线：TRANSFORMERS_OFFLINE / HF_HUB_OFFLINE 生效
+    """
+    def __init__(self, force_backend: Optional[str] = None, tfidf_model_path: Optional[str] = None):
         self.backend = None
-        self.vectorizer = None
+        self.vectorizer: Optional[TfidfVectorizer] = None
+
+        offline = os.getenv("TRANSFORMERS_OFFLINE", "").lower() in ("1", "true", "yes")
+        if offline:
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+        def _load_st():
+            model_name = os.getenv("EMB_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+            # 目录优先
+            if os.path.isdir(model_name):
+                print({"embedding_backend": "st", "load": "local_dir", "path": model_name, "offline": offline})
+                return SentenceTransformer(model_name)
+            else:
+                print({"embedding_backend": "st", "load": "repo_id", "repo": model_name, "offline": offline})
+                return SentenceTransformer(model_name)
+
+        def _load_tfidf():
+            print({"embedding_backend": "tfidf", "model_file": tfidf_model_path})
+            if tfidf_model_path and os.path.isfile(tfidf_model_path):
+                try:
+                    import joblib
+                    vec = joblib.load(tfidf_model_path)
+                    return vec
+                except Exception as e:
+                    print({"tfidf_load_failed": str(e)})
+            # fallback：临时新建一个（可能需要 fit）
+            return TfidfVectorizer(max_features=50000)
+
+        # 选择策略
         if force_backend == "st":
-            from sentence_transformers import SentenceTransformer
-            self.backend = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
+            if not USE_ST:
+                raise RuntimeError("后端指定为 ST，但未安装 sentence-transformers")
+            self.backend = _load_st()
             return
+
         if force_backend == "tfidf":
-            from sklearn.feature_extraction.text import TfidfVectorizer
-            self.vectorizer = TfidfVectorizer(max_features=50000)
+            if not USE_TFIDF:
+                raise RuntimeError("后端指定为 TF-IDF，但未安装 scikit-learn")
+            self.vectorizer = _load_tfidf()
             return
-        # 自动选择
+
+        # 自动选择：优先 ST，失败回退 TF-IDF
         if USE_ST:
-            self.backend = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-        elif USE_TFIDF:
-            self.vectorizer = TfidfVectorizer(max_features=50000)
-        else:
-            raise RuntimeError("缺少可用的向量化后端：pip install sentence-transformers 或 scikit-learn")
+            try:
+                self.backend = _load_st()
+                return
+            except Exception as e:
+                print({"st_init_failed": str(e), "fallback": "tfidf"})
+        if USE_TFIDF:
+            self.vectorizer = _load_tfidf()
+            return
+        raise RuntimeError("缺少可用的向量化后端：请安装 sentence-transformers 或 scikit-learn")
 
     def fit_transform(self, texts: List[str]) -> np.ndarray:
         if self.backend is not None:
@@ -107,7 +153,7 @@ class EmbeddingBackend:
         return np.asarray(X.todense(), dtype=np.float32)
 
 # ====== 索引保存/读取 ======
-def save_index(index_dir: str, chunks: List[str], embs: np.ndarray, meta: dict, sources: List[Dict]):
+def save_index(index_dir: str, chunks: List[str], embs: np.ndarray, meta: dict, sources: List[Dict], tfidf_vec: Optional[TfidfVectorizer] = None):
     os.makedirs(index_dir, exist_ok=True)
     with open(os.path.join(index_dir, "chunks.json"), "w", encoding="utf-8") as f:
         json.dump({"chunks": chunks, "sources": sources}, f, ensure_ascii=False)
@@ -116,6 +162,13 @@ def save_index(index_dir: str, chunks: List[str], embs: np.ndarray, meta: dict, 
         embeddings=embs.astype(np.float32),
         meta=np.bytes_(json.dumps(meta, ensure_ascii=False)),
     )
+    # 持久化 TF-IDF（如使用）
+    if tfidf_vec is not None:
+        try:
+            import joblib
+            joblib.dump(tfidf_vec, os.path.join(index_dir, TFIDF_MODEL_FILENAME))
+        except Exception as e:
+            print({"warn": "保存 TF-IDF 模型失败", "err": str(e)})
 
 def load_index(index_dir: str):
     chunks_path = os.path.join(index_dir, "chunks.json")
@@ -170,7 +223,7 @@ def cmd_ingest(args):
             print(f"跳过不可读取文件: {path} | 原因: {e}")
             continue
         chunks = chunk_text(text, chunk_size=args.chunk_size, overlap=args.overlap)
-        for c in chunks:
+        for _ in chunks:
             all_sources.append({"file": os.path.basename(path)})
         all_chunks.extend(chunks)
 
@@ -180,7 +233,8 @@ def cmd_ingest(args):
 
     # 选择并固化后端
     backend_tag = "st" if USE_ST else ("tfidf" if USE_TFIDF else "none")
-    eb = EmbeddingBackend(force_backend=backend_tag)
+    tfidf_model_path = os.path.join(args.index_dir, TFIDF_MODEL_FILENAME) if backend_tag == "tfidf" else None
+    eb = EmbeddingBackend(force_backend=backend_tag, tfidf_model_path=tfidf_model_path)
     embs = eb.fit_transform(all_chunks)
 
     meta = {
@@ -192,21 +246,27 @@ def cmd_ingest(args):
         "num_files": len(files),
         "files": [os.path.basename(p) for p in files],
     }
-    save_index(args.index_dir, all_chunks, embs, meta, all_sources)
+    save_index(args.index_dir, all_chunks, embs, meta, all_sources, tfidf_vec=eb.vectorizer if backend_tag == "tfidf" else None)
+
     print(f"✅ 索引完成：{args.index_dir}")
     print(f"- 文件数: {meta['num_files']} -> {', '.join(meta['files'])}")
     print(f"- 分片数: {meta['num_chunks']}")
     print(f"- 向量维度: {embs.shape[1]}")
     print(f"- 后端: {meta['backend']} ({meta['model']})")
+    if backend_tag == "tfidf":
+        print(f"- TF-IDF 模型: {TFIDF_MODEL_FILENAME}")
 
 # ====== query 命令 ======
 def cmd_query(args):
     chunks, sources, embs, meta = load_index(args.index_dir)
     backend_tag = meta.get("backend", "st")
-    eb = EmbeddingBackend(force_backend=backend_tag)
-    # TF-IDF 需要用语料拟合词表
-    if backend_tag == "tfidf" and eb.vectorizer is not None:
-        eb.vectorizer.fit(chunks)
+
+    tfidf_model_path = os.path.join(args.index_dir, TFIDF_MODEL_FILENAME) if backend_tag == "tfidf" else None
+    eb = EmbeddingBackend(force_backend=backend_tag, tfidf_model_path=tfidf_model_path)
+
+    # 注意：现在不再对 TF-IDF 进行 fit() —— 直接加载持久化向量器
+    if backend_tag == "tfidf" and (eb.vectorizer is None):
+        raise RuntimeError("TF-IDF 向量器未加载。请重新 ingest 或检查持久化文件是否存在。")
 
     q_emb = eb.transform([args.q])
     q_emb = q_emb / (np.linalg.norm(q_emb, axis=1, keepdims=True) + 1e-12)
