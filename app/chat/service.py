@@ -250,6 +250,8 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
             {"role": "user", "content": opening_user_msg}
         ]
 
+        print("messages: ", messages)
+
     # —— 流式 —— #
     if should_stream(request):
         def gen() -> Iterator[bytes]:
@@ -359,6 +361,8 @@ def send_chat(conversation_id: str, message: str, request: Request):
     messages = [{"role": "system", "content": composed}]
     messages.extend(conv["history"][-recentN:])
     messages.append({"role": "user", "content": message})
+
+    print("messages: ", messages)
 
     # 流式
     if should_stream(request):
