@@ -168,48 +168,67 @@ def _ms(spans: Dict[str, float]) -> Dict[str, int]:
 
 # ===================== 对话入口 =====================
 
-def send_chat(conversation_id: str, message: str, request: Request):
+
+# ===================== 对话入口 =====================
+
+def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int, request: Request):
     spans: Dict[str, float] = {}
     t0 = _now_ms()
 
     with _t("pre", spans):
-        conv = get_conv(conversation_id)
-        if not conv:
-            raise ValueError("会话不存在，请先 /chat/start")
-
-        # 查找本地知识库
-        kb_dir = conv.get("kb_index_dir")
         kb_passages: List[str] = []
-        if kb_dir and os.path.exists(os.path.join(kb_dir, "chunks.json")):
-            try:
-                with _t("pre_rag", spans):
-                    kb_passages = retrieve_kb(message, kb_dir, k=3)
-            except Exception:
-                kb_passages = []
 
-        composed = conv["pinned"]
-        if kb_passages:
-            kb_block = "\n\n".join(kb_passages)
-            composed = (
-                f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+        # 1）RAG 耗时
+        if kb_topk:
+            with _t("pre_rag", spans):
+                kb_passages = retrieve_kb(
+                    "开场上下文",
+                    os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
+                    k=min(3, kb_topk)
+                )
+
+        # 2）读 DB 配置耗时
+        with _t("pre_db", spans):
+            base_prompt = _load_system_prompt_from_db()
+
+        # 3）拼 system prompt 耗时
+        with _t("pre_build_prompt", spans):
+            composed = build_full_system_prompt(
+                base_prompt,
+                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"]},
+                kb_passages
             )
 
-        recentN = 10
-        messages = [{"role": "system", "content": composed}]
-        messages.extend(conv["history"][-recentN:])
-        messages.append({"role": "user", "content": message})
+        # 4）初始化会话、写入缓存耗时
+        with _t("pre_conv_init", spans):
+            cid = f"conv_{uuid.uuid4().hex[:8]}"
+            set_conv(cid, {
+                "pinned": composed,
+                "history": [],
+                "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX)
+            })
 
-    # 流式
+        opening_user_msg = (
+            "请基于以上命盘做一份通用且全面的解读，条理清晰，"
+            "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
+            "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
+        )
+
+        messages = [
+            {"role": "system", "content": composed},
+            {"role": "user", "content": opening_user_msg}
+        ]
+
+    # —— 流式 —— #
     if should_stream(request):
         def gen() -> Iterator[bytes]:
             nonlocal spans
             full: List[str] = []
+            first_byte_seen = False
             try:
-                yield sse_pack(json.dumps({"meta": {"conversation_id": conversation_id}}, ensure_ascii=False))
+                yield sse_pack(json.dumps({"meta": {"conversation_id": cid}}, ensure_ascii=False))
 
                 start_fb = time.perf_counter()
-                first_byte_seen = False
-
                 for delta in call_deepseek_stream(messages):
                     if not first_byte_seen:
                         spans["first_byte"] = time.perf_counter() - start_fb
@@ -218,18 +237,22 @@ def send_chat(conversation_id: str, message: str, request: Request):
                     if not delta:
                         continue
                     full.append(delta)
+
                     clean = normalize_markdown("".join(full))
                     clean = _scrub_br_block(clean)
                     clean = _collapse_double_newlines(clean)
                     clean = _third_sub(clean)
+
                     yield sse_pack(json.dumps({"text": clean, "replace": True}, ensure_ascii=False))
 
                 if not first_byte_seen:
                     spans["first_byte"] = time.perf_counter() - start_fb
 
                 yield sse_pack("[DONE]")
+
             except Exception as e:
                 yield sse_pack(f"[ERROR]{str(e)}")
+
             finally:
                 if "first_byte" in spans:
                     spans["streaming"] = time.perf_counter() - start_fb - spans["first_byte"]
@@ -239,21 +262,22 @@ def send_chat(conversation_id: str, message: str, request: Request):
                     final = _scrub_br_block(final)
                     final = _collapse_double_newlines(final)
                     final = _third_sub(final)
-                    append_history(conversation_id, "user", message)
-                    append_history(conversation_id, "assistant", final)
+                    append_history(cid, "user", opening_user_msg)
+                    append_history(cid, "assistant", final)
 
                 total_ms = _now_ms() - t0
                 print({
-                    "cid": conversation_id,
+                    "cid": cid,
                     "phase_ms": _ms(spans),
                     "t_total_ms": total_ms,
-                    "mode": "stream_send",
+                    "mode": "stream_start",
+                    "kb_topk": kb_topk,
                 })
 
         return sse_response(gen)
 
-    # 一次性
-    with _t("first_byte", spans):
+    # —— 一次性 —— #
+    with _t("first_byte", spans):   # 上游整体请求（DeepSeek）算作 first_byte
         reply_raw = call_deepseek(messages)
 
     with _t("post", spans):
@@ -261,18 +285,19 @@ def send_chat(conversation_id: str, message: str, request: Request):
         reply = _scrub_br_block(reply)
         reply = _collapse_double_newlines(reply)
         reply = _third_sub(reply)
-        append_history(conversation_id, "user", message)
-        append_history(conversation_id, "assistant", reply)
+        append_history(cid, "user", opening_user_msg)
+        append_history(cid, "assistant", reply)
 
     total_ms = _now_ms() - t0
     print({
-        "cid": conversation_id,
+        "cid": cid,
         "phase_ms": _ms(spans),
         "t_total_ms": total_ms,
-        "mode": "oneshot_send",
+        "mode": "oneshot_start",
+        "kb_topk": kb_topk,
     })
 
-    return reply
+    return cid, reply
 
 
 def send_chat(conversation_id: str, message: str, request: Request):
