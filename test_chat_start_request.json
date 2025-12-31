@@ -1,0 +1,55 @@
+{
+  "paipan": {
+    "four_pillars": {
+      "year": ["癸", "酉"],
+      "month": ["乙", "卯"],
+      "day": ["甲", "寅"],
+      "hour": ["戊", "辰"]
+    },
+    "dayun": [
+      {
+        "age": 2,
+        "start_year": 1995,
+        "pillar": ["甲", "寅"]
+      },
+      {
+        "age": 12,
+        "start_year": 2005,
+        "pillar": ["乙", "卯"]
+      },
+      {
+        "age": 22,
+        "start_year": 2015,
+        "pillar": ["丙", "辰"]
+      },
+      {
+        "age": 32,
+        "start_year": 2025,
+        "pillar": ["丁", "巳"]
+      },
+      {
+        "age": 42,
+        "start_year": 2035,
+        "pillar": ["戊", "午"]
+      },
+      {
+        "age": 52,
+        "start_year": 2045,
+        "pillar": ["己", "未"]
+      },
+      {
+        "age": 62,
+        "start_year": 2055,
+        "pillar": ["庚", "申"]
+      },
+      {
+        "age": 72,
+        "start_year": 2065,
+        "pillar": ["辛", "酉"]
+      }
+    ]
+  },
+  "kb_index_dir": null,
+  "kb_topk": 3,
+  "note": "Test chat start request"
+}
