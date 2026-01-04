@@ -17,10 +17,10 @@ def call_deepseek(messages: List[Dict[str, str]]) -> str:
         "model": DEEPSEEK_MODEL,
         "messages": messages,
         "temperature": 1.3,
-        "max_tokens": 4096
+        "max_tokens": 8192
     }
     # print("call_deepseek", payload)
-    r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+    r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=300)
     r.raise_for_status()
     data = r.json()
     # print("call_deepseek", data)
@@ -34,8 +34,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]]) -> Iterator[str]:
     payload = {
         "model": DEEPSEEK_MODEL,
         "messages": messages,
-        "temperature": 0.7,
-        "max_tokens": 4000,
+        "temperature": 1.3,
+        "max_tokens": 8192,
         "stream": True,
     }
     with requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, stream=True, timeout=300) as r:
