@@ -169,11 +169,12 @@ def calc_bazi(body: PaipanIn):
                 "pillar": pillar_list  # 若库返回异常或空，会是 []
             })
 
-        print("输出结果：", {"mingpan": {"four_pillars": four_pillars, "dayun": dayun_list}})
+        print("输出结果：", {"mingpan": {"gender": body.gender, "four_pillars": four_pillars, "dayun": dayun_list}})
 
         # 5) 返回同结构
         return {
             "mingpan": {
+                "gender": body.gender,
                 "four_pillars": four_pillars,
                 "dayun": dayun_list
             }
