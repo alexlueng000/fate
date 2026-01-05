@@ -1,7 +1,7 @@
 from __future__ import annotations
 from datetime import datetime
 from pydantic import BaseModel, Field
-from typing import Literal, Optional, List
+from typing import Literal, Optional, List, Dict, Any
 
 
 MessageRole = Literal["user", "assistant", "system"]
@@ -50,6 +50,7 @@ class HistoryResp(BaseModel):
 
 # === 排盘 ===
 class PaipanPayload(BaseModel):
+    gender: str = Field(..., description="性别：男/女")
     four_pillars: Dict[str, List[str]]
     dayun: List[Dict[str, Any]]
 

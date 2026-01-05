@@ -242,7 +242,7 @@ def build_full_system_prompt(mingpan: Dict[str, Any], kb_passages: List[str]) ->
     fp_text = format_four_pillars(mingpan["four_pillars"])
     dy_text = format_dayun(mingpan["dayun"])
     # 你的 system_prompt 用的是 {{FOUR_PILLARS}}/{{DAYUN}}，这里替换为实际文本
-    composed = system_prompt.replace("{FOUR_PILLARS}", fp_text).replace("{DAYUN}", dy_text)
+    composed = system_prompt.replace("{{FOUR_PILLARS}}", fp_text).replace("{{DAYUN}}", dy_text)
     if kb_passages:
         kb_block = "\n\n".join(kb_passages[:3])  # 控制长度，最多取3段
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
