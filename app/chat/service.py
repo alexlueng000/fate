@@ -65,7 +65,7 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         with utils.timer("pre_build_prompt", spans):
             composed = utils.build_full_system_prompt(
                 base_prompt,
-                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"]},
+                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"]},
                 kb_passages
             )
 
