@@ -13,6 +13,7 @@ from app.services.users import (
     get_by_email,
     touch_last_login,
 )
+from app.services.wechat import jscode2session
 from app.deps import get_current_user
 from app.models.user import User
 from app.config import settings
@@ -139,13 +140,13 @@ def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> Aut
 # ================================== 小程序：登录（开发态兼容版） ==================================
 
 @router.post("/auth/mp/login", response_model=AuthResponse)
-def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
+async def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
     """
     小程序登录（兼容直登与开发态）：
     - 有 openid → 幂等获取/创建。
     - 有 js_code：
         * js_code=dev → 使用 DEV_OPENID 直登/创建（开发环境）
-        * 其他 js_code → 此处未对接 code2session，直接返回 400（按你的计划后续接入）。
+        * 其他 js_code → 调用微信 jscode2session API 换取 openid/unionid/session_key。
     - 成功后签发 Access Token。
     """
     # 1) 确定 openid
@@ -155,11 +156,27 @@ def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthR
         if payload.js_code == "dev":
             openid = DEV_OPENID
         else:
-            # TODO：接入微信 code2session，换取 openid/unionid/session_key
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="WeChat code2session 未配置，请使用 js_code=dev 或直接提供 openid（开发态）",
-            )
+            # 调用微信 code2session
+            if not settings.wx_appid or not settings.wx_secret:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="WX_APPID 或 WX_SECRET 未配置，请检查 .env 文件",
+                )
+            data = await jscode2session(settings.wx_appid, settings.wx_secret, payload.js_code)
+
+            # 微信错误处理
+            if "errcode" in data:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"微信 API 错误: {data.get('errmsg')} (errcode: {data.get('errcode')})",
+                )
+
+            openid = data.get("openid")
+            if not openid:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="微信 API 未返回 openid",
+                )
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="需提供 openid 或 js_code")
 

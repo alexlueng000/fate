@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     dev_openid: str = "dev_openid"
 
     # -----------------------------
+    # WeChat Mini Program Login
+    # -----------------------------
+    wx_appid: Optional[str] = None
+    wx_secret: Optional[str] = None
+
+    # -----------------------------
     # WeChat Pay v3
     # -----------------------------
     # 'prod'：严格验签/解密；'dev'：跳过验签便于联调
