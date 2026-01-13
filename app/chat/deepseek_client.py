@@ -16,7 +16,7 @@ def call_deepseek(messages: List[Dict[str, str]]) -> str:
     payload = {
         "model": DEEPSEEK_MODEL,
         "messages": messages,
-        "temperature": 1.3,
+        "temperature": 0.7,
         "max_tokens": 8192
     }
     # print("call_deepseek", payload)
