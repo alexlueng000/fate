@@ -13,7 +13,21 @@ from app.utils.username import slugify_username
 
 
 # ========== 默认头像配置 ==========
-DEFAULT_AVATAR_URL = "https://api.fateinsight.site/static/default-avatar.png"
+import random
+
+# 系统头像列表，注册时随机选择一个
+SYSTEM_AVATARS = [
+    "https://api.fateinsight.site/static/avatars/avatar-1.png",
+    "https://api.fateinsight.site/static/avatars/avatar-2.png",
+    "https://api.fateinsight.site/static/avatars/avatar-3.png",
+    "https://api.fateinsight.site/static/avatars/avatar-4.png",
+    "https://api.fateinsight.site/static/avatars/avatar-5.png",
+    "https://api.fateinsight.site/static/avatars/avatar-6.png",
+]
+
+def get_random_avatar() -> str:
+    """随机获取一个系统头像"""
+    return random.choice(SYSTEM_AVATARS)
 
 
 # ========== 工具函数 ==========
@@ -116,7 +130,7 @@ def get_or_create_by_openid(
         openid=openid,
         nickname=nickname,
         username=slugify_username(nickname),
-        avatar_url=avatar_url or DEFAULT_AVATAR_URL,
+        avatar_url=avatar_url or get_random_avatar(),
         is_admin=bool(is_admin) if is_admin is not None else False,
         source=source,
     )
