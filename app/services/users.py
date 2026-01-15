@@ -12,6 +12,10 @@ from app.models.user import User
 from app.utils.username import slugify_username
 
 
+# ========== 默认头像配置 ==========
+DEFAULT_AVATAR_URL = "https://api.fateinsight.site/static/default-avatar.png"
+
+
 # ========== 工具函数 ==========
 
 def _normalize_email(email: Optional[str]) -> Optional[str]:
@@ -112,7 +116,7 @@ def get_or_create_by_openid(
         openid=openid,
         nickname=nickname,
         username=slugify_username(nickname),
-        avatar_url=avatar_url,
+        avatar_url=avatar_url or DEFAULT_AVATAR_URL,
         is_admin=bool(is_admin) if is_admin is not None else False,
         source=source,
     )
