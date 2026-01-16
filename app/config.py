@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     single_product_code: str = "REPORT_UNLOCK"
     # 开发态固定 openid，配合 js_code=dev 登录
     dev_openid: str = "dev_openid"
+    # 命盘加密密钥（32字节）
+    chart_encryption_key: str = "change-me-32-bytes-key-here!!!"
 
     # -----------------------------
     # WeChat Mini Program Login

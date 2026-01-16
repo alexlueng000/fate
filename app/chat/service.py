@@ -27,6 +27,31 @@ from . import utils
 DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
 
 
+# ===================== 内部辅助函数 =====================
+
+def _create_session_with_mingpan(mingpan: Dict[str, Any]) -> tuple[Dict[str, Any], str]:
+    """
+    使用命盘数据静默创建会话（不生成AI开场白）。
+
+    Args:
+        mingpan: 命盘数据，包含 four_pillars, dayun, gender
+
+    Returns:
+        (conv, conversation_id) 元组
+    """
+    base_prompt = utils.load_system_prompt_from_db()
+    composed = utils.build_full_system_prompt(base_prompt, mingpan, [])
+
+    cid = f"conv_{uuid.uuid4().hex[:8]}"
+    conv = {
+        "pinned": composed,
+        "history": [],
+        "kb_index_dir": DEFAULT_KB_INDEX
+    }
+    set_conv(cid, conv)
+    return conv, cid
+
+
 # ===================== 对话入口 =====================
 
 def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int, request: Request):
@@ -170,24 +195,31 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
     return cid, reply
 
 
-def send_chat(conversation_id: str, message: str, request: Request):
+def send_chat(conversation_id: str, message: str, request: Request, mingpan: Optional[Dict[str, Any]] = None):
     """
     Send a message in an existing conversation.
+    If no conversation exists but mingpan is provided, create a new session silently.
 
     Args:
-        conversation_id: Existing conversation ID
+        conversation_id: Existing conversation ID (can be empty if mingpan provided)
         message: User message content
         request: FastAPI request object (for streaming detection)
+        mingpan: Optional Bazi data for creating new session
 
     Returns:
         StreamingResponse or reply_text string
 
     Raises:
-        ValueError: If conversation doesn't exist
+        ValueError: If conversation doesn't exist and no mingpan provided
     """
-    conv = get_conv(conversation_id)
+    conv = get_conv(conversation_id) if conversation_id else None
+
+    # 没有会话但有命盘数据，静默创建会话
+    if not conv and mingpan:
+        conv, conversation_id = _create_session_with_mingpan(mingpan)
+
     if not conv:
-        raise ValueError("会话不存在，请先 /chat/start")
+        raise ValueError("请先排盘或选择已保存的命盘")
 
     # 查找本地知识库
     kb_dir = conv.get("kb_index_dir")

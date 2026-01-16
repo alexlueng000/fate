@@ -33,3 +33,5 @@ token.py
 migrations/
 alembic.ini
 alembic/
+
+tmp*

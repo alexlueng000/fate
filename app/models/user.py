@@ -20,6 +20,10 @@ from app.db import Base  # 按你的项目路径调整
 # from .order import Order
 # from .entitlement import Entitlement
 # from .user_identity import UserIdentity  # 如果你已经有该表，可解开注释
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .saved_chart import SavedChart
 
 
 class User(Base):
@@ -171,6 +175,14 @@ class User(Base):
     #     passive_deletes=True,
     #     doc="第三方身份集合（如 wechat_miniapp / github / email_otp 等）"
     # )
+
+    # 保存的命盘
+    saved_charts: Mapped[List["SavedChart"]] = relationship(
+        "SavedChart",
+        back_populates="user",
+        cascade="all,delete-orphan",
+        passive_deletes=True,
+    )
 
     # === 便捷属性/方法（非字段） ===
     @property

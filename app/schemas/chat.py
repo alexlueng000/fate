@@ -65,8 +65,9 @@ class ChatStartResp(BaseModel):
     reply: str
 
 class ChatSendReq(BaseModel):
-    conversation_id: str = Field(..., description="由 /chat/start 返回")
+    conversation_id: str = Field(default="", description="由 /chat/start 返回，首次可为空")
     message: str
+    mingpan: Optional[Dict[str, Any]] = Field(default=None, description="命盘数据，首次对话时传入")
 
 class ChatSendResp(BaseModel):
     conversation_id: str

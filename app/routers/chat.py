@@ -41,9 +41,10 @@ def chat_start(req: ChatStartReq, request: Request, db: Session = Depends(get_db
 def chat_send(req: ChatSendReq, request: Request, db: Session = Depends(get_db)):
     """
     续聊：支持 SSE（根据 Accept 或 ?stream=1）
+    如果 conversation_id 为空但提供了 mingpan，会静默创建新会话
     """
     try:
-        result = send_chat(req.conversation_id, req.message, request)
+        result = send_chat(req.conversation_id, req.message, request, req.mingpan)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
 
