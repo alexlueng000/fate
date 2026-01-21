@@ -569,3 +569,10 @@ DATABASE_URL（Postgres/MySQL 任一）
   心境，增强定力。
 4.  **健康关注**：流年火土气盛，需注意脾胃系统的养护，饮食规律，避免过食生冷油腻。同时，因寅申冲，仍需关注作息规律，保障充足的睡眠。
 以上内容由传统文化AI生成，仅供娱乐参考。命理是对人生趋势的一种探索，真正的精彩在于我们如何运用智慧与努力，去创造和把握属于自己的未来。
+
+
+===================
+
+python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+export EMB_MODEL=~/fate/models/bge-small-zh-v1.5
+python kb_rag_mult.py ingest -i ./docs -o ./kb_index

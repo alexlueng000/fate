@@ -167,6 +167,31 @@ def admin_get_revisions(
     ), {"k": key, "lim": limit, "off": offset}).mappings().all()
     return [dict(r) for r in rows]
 
+
+@router.get("/config/revision")
+def admin_get_revision(
+    key: str = Query(..., description="配置项 key"),
+    version: int = Query(..., ge=1, description="版本号"),
+    db: Session = Depends(get_db)
+):
+    """获取指定历史版本的完整详情，包括 value_json 内容"""
+    if key not in ALLOWED_KEYS:
+        raise HTTPException(400, f"不支持的 key：{key}")
+    row = db.execute(text(
+        "SELECT cfg_key, value_json, version, created_at, editor_id, comment "
+        "FROM app_config_revisions WHERE cfg_key=:k AND version=:v"
+    ), {"k": key, "v": version}).mappings().first()
+    if not row:
+        raise HTTPException(404, f"找不到版本：{key} v{version}")
+    return {
+        "key": row["cfg_key"],
+        "value_json": row["value_json"],
+        "version": row["version"],
+        "created_at": row["created_at"],
+        "editor_id": row["editor_id"],
+        "comment": row["comment"],
+    }
+
 @router.post("/config/save")
 async def admin_save_config(
     payload: ConfigSaveReq,
