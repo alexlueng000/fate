@@ -26,7 +26,7 @@ DEV_OPENID = getattr(settings, "dev_openid", "dev_openid")
 
 # ======== Pydantic 入参模型（就近定义，便于落地；如你更偏好放 app.schemas 也可迁走） ========
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 class WebRegisterRequest(BaseModel):
     """Web 注册：邮箱 + 密码 + 昵称(可选) + 头像(可选)"""
@@ -55,9 +55,11 @@ class MpLoginRequest(BaseModel):
     avatar_url: str | None = Field(None, max_length=256, description="头像URL（可选）")
 
 class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)  # 支持 SQLAlchemy 对象
+
     id: int
     email: str | None = None
-    username: str
+    username: str | None = None  # 改为可选，兼容历史数据
     nickname: str | None = None
     avatar_url: str | None = None
     is_admin: bool
@@ -105,7 +107,7 @@ def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) 
 
     return AuthResponse(
         access_token=token,
-        user=UserOut.model_validate(user.__dict__)
+        user=UserOut.model_validate(user)
     )
 
 
@@ -133,7 +135,7 @@ def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> Aut
     token = create_access_token(user.id, extra={"is_admin": user.is_admin})
     return AuthResponse(
         access_token=token,
-        user=UserOut.model_validate(user.__dict__)
+        user=UserOut.model_validate(user)
     )
 
 
@@ -196,7 +198,7 @@ async def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) ->
     token = create_access_token(user.id, extra={"is_admin": user.is_admin})
     return AuthResponse(
         access_token=token,
-        user=UserOut.model_validate(user.__dict__)
+        user=UserOut.model_validate(user)
     )
 
 

@@ -97,6 +97,7 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
             nonlocal spans
             first_byte_seen = False
             normalizer = utils.IncrementalNormalizer(normalize_interval=50)
+            final = ""  # 初始化，避免 finally 中访问未定义的变量
 
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": cid}}, ensure_ascii=False))
@@ -214,6 +215,7 @@ def send_chat(conversation_id: str, message: str, request: Request):
     if should_stream(request):
         def gen() -> Iterator[bytes]:
             normalizer = utils.IncrementalNormalizer(normalize_interval=50)
+            final = ""  # 初始化，避免 finally 中访问未定义的变量
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": conversation_id}}, ensure_ascii=False))
                 for delta in call_deepseek_stream(messages):
