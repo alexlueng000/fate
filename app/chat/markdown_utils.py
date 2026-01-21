@@ -85,6 +85,15 @@ def _ensure_blankline_before_list_after_colon(s: str) -> str:
     return _COLON_LIST.sub(r"\1\n\n", s)
 
 
+# 标题后第一个空格处添加换行（如果空格后跟中文内容）
+# 匹配：### 八字命盘总览 年柱：... -> ### 八字命盘总览\n年柱：...
+_HEADING_SPACE_CONTENT = re.compile(r'^(#{1,6}\s+[\u4e00-\u9fff]+)\s+(?=[\u4e00-\u9fff])', re.MULTILINE)
+
+def _split_heading_content(s: str) -> str:
+    """在标题后的第一个空格处添加换行（如果空格后跟中文）"""
+    return _HEADING_SPACE_CONTENT.sub(r'\1\n', s)
+
+
 def normalize_markdown(md: str) -> str:
     """
     - 统一换行/去零宽
@@ -146,6 +155,9 @@ def normalize_markdown(md: str) -> str:
     # 还原代码
     s = _restore_placeholders(s, inline,  "I")
     s = _restore_placeholders(s, fenced, "F")
+
+    # === 新增：标题后空格处分割内容 ===
+    s = _split_heading_content(s)
 
     # === 新增：标题块强制换行 ===
     # s = _ensure_blankline_before_list_after_colon(s)
