@@ -42,7 +42,7 @@ def _paren_balance(text: str) -> int:
 
 def _ensure_heading_blocks(s: str) -> str:
     """
-    把所有标题行强制变成一个“独立块”：
+    把所有标题行强制变成一个"独立块"：
     - 标题行前：若不是文首且前一行不是空行，补一个空行
     - 标题行后：若下一行不是空行，补一个空行
     这样 ReactMarkdown/marked 等解析器一定会把它当作标题，而不是普通段落里的文字。
@@ -58,8 +58,7 @@ def _ensure_heading_blocks(s: str) -> str:
             if out and out[-1].strip() != "":
                 out.append("")  # 插入空行
             out.append(ln.rstrip())
-            out.append("<br/>")  # ← 复刻你说的那版
-            # 然后再判断是否需要空行
+            # 确保标题后有空行
             nxt = lines[i+1] if i+1 < n else None
             if nxt is not None and nxt.strip() != "":
                 out.append("")
@@ -148,6 +147,9 @@ def normalize_markdown(md: str) -> str:
 
     s = "\n".join(out)
     s = re.sub(r"\n{3,}", "\n\n", s)
+
+    # 清理遗留的 <br/> 标签（可能导致显示问题）
+    s = re.sub(r"<br\s*/?>", "", s)
 
     # 这里替换  \n<br/>\n\n 以及常见等价写法为一个空格
     s = re.sub(r"(?:\r?\n)?<br\s*/?>\s*\r?\n\r?\n", " ", s)
