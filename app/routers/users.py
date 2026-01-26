@@ -1,10 +1,10 @@
 # app/routers/users.py
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
-from app.db import get_db_tx
+from app.db import get_db, get_db_tx
 # from app.schemas import Token, UserOut  # 复用你现有的响应模型
 from app.security import create_access_token, hash_password, verify_password
 from app.services.users import (
@@ -13,6 +13,7 @@ from app.services.users import (
     get_by_email,
     touch_last_login,
 )
+from app.services.invitation_codes import validate_code, use_code
 from app.services.wechat import jscode2session
 from app.deps import get_current_user
 from app.models.user import User
@@ -29,10 +30,11 @@ DEV_OPENID = getattr(settings, "dev_openid", "dev_openid")
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 class WebRegisterRequest(BaseModel):
-    """Web 注册：邮箱 + 密码 + 昵称(可选) + 头像(可选)"""
+    """Web 注册：邮箱 + 密码 + 邀请码 + 昵称(可选) + 头像(可选)"""
     email: EmailStr = Field(..., description="邮箱（唯一）")
     username: str = Field(..., description="用户名（唯一）")
     password: str = Field(..., min_length=6, max_length=128, description="明文密码（后台会做哈希）")
+    invitation_code: str = Field(..., min_length=4, max_length=32, description="邀请码")
     nickname: str | None = Field(None, max_length=64, description="昵称（可选）")
     avatar_url: str | None = Field(None, max_length=256, description="头像URL（可选）")
 
@@ -73,21 +75,31 @@ class AuthResponse(BaseModel):
 # ================================== Web 账户：注册 / 登录 ==================================
 
 @router.post("/auth/web/register", response_model=AuthResponse)
-def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
+def web_register(
+    request: Request,
+    payload: WebRegisterRequest,
+    db: Session = Depends(get_db_tx)
+) -> AuthResponse:
     """
-    Web 注册（邮箱+密码）：
+    Web 注册（邮箱+密码+邀请码）：
+    - 先验证邀请码是否有效
     - 校验邮箱唯一；密码在路由层进行哈希（推荐 Argon2id/bcrypt），再写入数据库。
     - 成功后直接签发 Access Token（与现有 token 体系一致），并返回。
     """
-    # 1) 查重
+    # 1) 验证邀请码
+    is_valid, error_msg, inv_code = validate_code(db, payload.invitation_code)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+
+    # 2) 查重
     existing = get_by_email(db, payload.email)
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已注册")
 
-    # 2) 生成密码哈希（由 app.security.hash_password 实现）
+    # 3) 生成密码哈希（由 app.security.hash_password 实现）
     pwd_hash = hash_password(payload.password)
 
-    # 3) 创建用户（source=web）
+    # 4) 创建用户（source=web）
     user = create_user_email_password(
         db,
         email=str(payload.email),
@@ -99,10 +111,14 @@ def web_register(payload: WebRegisterRequest, db: Session = Depends(get_db_tx)) 
         source="web",
     )
 
-    # 4) 登录痕迹（可选）
+    # 5) 记录邀请码使用
+    client_ip = request.client.host if request.client else None
+    use_code(db, inv_code, user.id, ip_address=client_ip)
+
+    # 6) 登录痕迹（可选）
     touch_last_login(db, user)
 
-    # 5) 签发 JWT（与你现有逻辑保持一致）
+    # 7) 签发 JWT（与你现有逻辑保持一致）
     token = create_access_token(user.id, extra={"is_admin": user.is_admin})
 
     return AuthResponse(
@@ -221,3 +237,32 @@ def login_compat(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> A
 def me(current_user: User = Depends(get_current_user)) -> UserOut:
     """返回当前登录用户信息。"""
     return current_user
+
+
+# ================================== 邀请码验证 ==================================
+
+class ValidateInvitationCodeRequest(BaseModel):
+    """验证邀请码请求"""
+    code: str = Field(..., min_length=4, max_length=32, description="邀请码")
+
+
+class ValidateInvitationCodeResponse(BaseModel):
+    """验证邀请码响应"""
+    valid: bool
+    message: str
+
+
+@router.post("/auth/validate-invitation-code", response_model=ValidateInvitationCodeResponse)
+def validate_invitation_code(
+    payload: ValidateInvitationCodeRequest,
+    db: Session = Depends(get_db)
+) -> ValidateInvitationCodeResponse:
+    """
+    验证邀请码是否有效（不消耗使用次数）
+    - 用于前端实时验证
+    """
+    is_valid, error_msg, _ = validate_code(db, payload.code)
+    return ValidateInvitationCodeResponse(
+        valid=is_valid,
+        message=error_msg if not is_valid else "邀请码有效"
+    )
