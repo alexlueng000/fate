@@ -63,11 +63,14 @@ def validate_code(db: Session, code: str) -> Tuple[bool, str, Optional[Invitatio
             return False, "该邀请码已过期", None
 
     # 检查使用次数
-    if inv_code.code_type == "single_use" and inv_code.used_count >= 1:
+    # 如果 max_uses > 1，即使 code_type 是 single_use 也按多次使用处理
+    if inv_code.max_uses == 1 and inv_code.used_count >= 1:
         return False, "该邀请码已被使用", None
 
-    if inv_code.code_type == "multi_use" and inv_code.max_uses > 0 and inv_code.used_count >= inv_code.max_uses:
+    if inv_code.max_uses > 1 and inv_code.used_count >= inv_code.max_uses:
         return False, "该邀请码已达到使用上限", None
+
+    # max_uses == 0 表示无限使用，不检查次数
 
     return True, "", inv_code
 

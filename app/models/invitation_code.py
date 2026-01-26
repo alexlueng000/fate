@@ -135,9 +135,10 @@ class InvitationCode(Base):
             exp = self.expires_at.replace(tzinfo=timezone.utc) if self.expires_at.tzinfo is None else self.expires_at
             if now > exp:
                 return False
-        if self.code_type == "single_use" and self.used_count >= 1:
+        # 检查使用次数：max_uses 决定可用次数，0 表示无限
+        if self.max_uses == 1 and self.used_count >= 1:
             return False
-        if self.code_type == "multi_use" and self.max_uses > 0 and self.used_count >= self.max_uses:
+        if self.max_uses > 1 and self.used_count >= self.max_uses:
             return False
         return True
 
