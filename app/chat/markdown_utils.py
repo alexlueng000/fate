@@ -112,6 +112,14 @@ def normalize_markdown(md: str) -> str:
     lines = s.split("\n")
     out: List[str] = []
     i = 0
+    # 排除模式：看起来像独立内容行而非标题碎片
+    # 如：年柱：、月柱：、日柱：、时柱：、起运：、大运：等
+    _EXCLUDE_PREFIXES = (
+        '年柱', '月柱', '日柱', '时柱', '起运', '大运', '流年',
+        '命主', '日主', '性别', '格局', '喜用', '忌神',
+        '财星', '官星', '印星', '食伤', '比劫',
+        '事业', '财运', '感情', '婚姻', '健康',
+    )
     while i < len(lines):
         line = lines[i]
         if re.match(r"^\s*#{1,6}\s+\S", line):
@@ -130,6 +138,9 @@ def normalize_markdown(md: str) -> str:
                     j += 1
                     continue
                 if _RE_STRUCTURAL.match(nxt):
+                    break
+                # 检查是否以排除前缀开头（如"年柱：乙巳..."），如果是则不合并
+                if stripped.startswith(_EXCLUDE_PREFIXES):
                     break
                 if len(stripped) <= 24 or stripped in _TAIL_TOKENS:
                     parts.append(stripped)
