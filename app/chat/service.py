@@ -156,6 +156,13 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         reply = utils.scrub_br_block(reply)
         reply = utils.collapse_double_newlines(reply)
         reply = utils.third_sub(reply)
+        # Apply sensitive word filtering
+        try:
+            from .content_filter import apply_content_filters
+            with utils.db_session() as db:
+                reply = apply_content_filters(reply, db)
+        except Exception:
+            pass
         append_history(cid, "user", opening_user_msg)
         append_history(cid, "assistant", reply)
 
@@ -242,6 +249,13 @@ def send_chat(conversation_id: str, message: str, request: Request):
     reply = utils.scrub_br_block(reply)
     reply = utils.collapse_double_newlines(reply)
     reply = utils.third_sub(reply)
+    # Apply sensitive word filtering
+    try:
+        from .content_filter import apply_content_filters
+        with utils.db_session() as db:
+            reply = apply_content_filters(reply, db)
+    except Exception:
+        pass
     append_history(conversation_id, "user", message)
     append_history(conversation_id, "assistant", reply)
     return reply
@@ -298,6 +312,13 @@ def regenerate(conversation_id: str) -> str:
     messages.extend(trimmed_history)
 
     reply = normalize_markdown(call_deepseek(messages))
+    # Apply sensitive word filtering
+    try:
+        from .content_filter import apply_content_filters
+        with utils.db_session() as db:
+            reply = apply_content_filters(reply, db)
+    except Exception:
+        pass
     append_history(conversation_id, "assistant", reply)
     return reply
 

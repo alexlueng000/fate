@@ -252,15 +252,17 @@ class IncrementalNormalizer:
     this class batches normalization and only processes dirty regions.
     """
 
-    def __init__(self, normalize_interval: int = 50):
+    def __init__(self, normalize_interval: int = 50, apply_content_filter: bool = True):
         """
         Args:
             normalize_interval: Normalize every N tokens (default: 50)
+            apply_content_filter: Whether to apply sensitive word filtering (default: True)
         """
         from .markdown_utils import normalize_markdown
 
         self._normalize_markdown = normalize_markdown
         self._normalize_interval = normalize_interval
+        self._apply_content_filter = apply_content_filter
         self._raw_chunks: List[str] = []
         self._token_count = 0
         self._last_normalized: str = ""
@@ -301,6 +303,15 @@ class IncrementalNormalizer:
         normalized = scrub_br_block(normalized)
         normalized = collapse_double_newlines(normalized)
         normalized = third_sub(normalized)
+        # Apply sensitive word filtering
+        if self._apply_content_filter:
+            try:
+                from .content_filter import apply_content_filters
+                with db_session() as db:
+                    normalized = apply_content_filters(normalized, db)
+            except Exception:
+                # 过滤失败不影响主流程
+                pass
         self._last_normalized = normalized
         return normalized
 

@@ -8,7 +8,7 @@ import app.models as models  # 确保模型注册到 Base（修正原先的导�
 
 # 说明：为避免 /auth/login 路由冲突，这里不再引入旧的 auth.router
 # from app.routers import chat, bazi, products, orders, payments, users, entitlements, webhooks
-from app.routers import chat, bazi, users, chat_basic, admin, config_public, kb, invitation_codes
+from app.routers import chat, bazi, users, chat_basic, admin, config_public, kb, invitation_codes, sensitive_words
 
 
 def create_app() -> FastAPI:
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(config_public.router, prefix="/api", tags=["config_public"])
     app.include_router(kb.router, prefix="/api", tags=["kb"])
     app.include_router(invitation_codes.router, prefix="/api", tags=["invitation-codes"])
+    app.include_router(sensitive_words.router, prefix="/api", tags=["sensitive-words"])
 
     # 未来业务（保留）
     # app.include_router(products.router, prefix="/api/products", tags=["products"])
