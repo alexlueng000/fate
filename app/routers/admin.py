@@ -94,9 +94,13 @@ def fetch_current(db: Session, key: str) -> Optional[dict]:
     ).mappings().first()
     if not row:
         return None
+    # 确保 value_json 是字典类型（MySQL JSON 类型有时返回字符串）
+    value_json = row["value_json"]
+    if isinstance(value_json, str):
+        value_json = json.loads(value_json)
     return {
         "key": row["cfg_key"],
-        "value_json": row["value_json"],
+        "value_json": value_json,
         "version": row["version"],
         "updated_at": row["updated_at"],
         "editor_id": row["editor_id"],
@@ -111,7 +115,11 @@ def fetch_revision(db: Session, key: str, version: int) -> Optional[dict]:
     ).mappings().first()
     if not row:
         return None
-    return dict(row)
+    # 确保 value_json 是字典类型
+    result = dict(row)
+    if isinstance(result.get("value_json"), str):
+        result["value_json"] = json.loads(result["value_json"])
+    return result
 
 def next_version(db: Session, key: str) -> int:
     row = db.execute(
@@ -183,9 +191,13 @@ def admin_get_revision(
     ), {"k": key, "v": version}).mappings().first()
     if not row:
         raise HTTPException(404, f"找不到版本：{key} v{version}")
+    # 确保 value_json 是字典类型
+    value_json = row["value_json"]
+    if isinstance(value_json, str):
+        value_json = json.loads(value_json)
     return {
         "key": row["cfg_key"],
-        "value_json": row["value_json"],
+        "value_json": value_json,
         "version": row["version"],
         "created_at": row["created_at"],
         "editor_id": row["editor_id"],
