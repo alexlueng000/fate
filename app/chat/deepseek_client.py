@@ -34,7 +34,7 @@ def call_deepseek_stream(messages: List[Dict[str, str]]) -> Iterator[str]:
     payload = {
         "model": DEEPSEEK_MODEL,
         "messages": messages,
-        "temperature": 1.3,
+        "temperature": 0.7,
         "max_tokens": 8192,
         "stream": True,
     }
