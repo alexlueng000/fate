@@ -174,8 +174,8 @@ def normalize_markdown(md: str) -> str:
     s = _restore_placeholders(s, inline,  "I")
     s = _restore_placeholders(s, fenced, "F")
 
-    # === 新增：标题后空格处分割内容 ===
-    s = _split_heading_content(s)
+    # === 标题后空格处分割内容（暂时禁用，可能与敏感词过滤冲突）===
+    # s = _split_heading_content(s)
 
     # === 新增：标题块强制换行 ===
     # s = _ensure_blankline_before_list_after_colon(s)
