@@ -161,10 +161,8 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
             from .content_filter import apply_content_filters
             with utils.db_session() as db:
                 reply = apply_content_filters(reply, db)
-            # 清理敏感词过滤后可能产生的标题后多余空行
-            # 避免标题内容被空行截断导致显示异常
-            import re
-            reply = re.sub(r'^(#{1,6}[^\n]*)\n\s*\n', r'\1\n', reply, flags=re.MULTILINE)
+            # 敏感词过滤后再次调用 normalize_markdown 修复可能被拆分的标题
+            reply = normalize_markdown(reply)
         except Exception:
             pass
         append_history(cid, "user", opening_user_msg)
@@ -258,9 +256,8 @@ def send_chat(conversation_id: str, message: str, request: Request):
         from .content_filter import apply_content_filters
         with utils.db_session() as db:
             reply = apply_content_filters(reply, db)
-        # 清理敏感词过滤后可能产生的标题后多余空行
-        import re
-        reply = re.sub(r'^(#{1,6}[^\n]*)\n\s*\n', r'\1\n', reply, flags=re.MULTILINE)
+        # 敏感词过滤后再次调用 normalize_markdown 修复可能被拆分的标题
+        reply = normalize_markdown(reply)
     except Exception:
         pass
     append_history(conversation_id, "user", message)
@@ -324,9 +321,8 @@ def regenerate(conversation_id: str) -> str:
         from .content_filter import apply_content_filters
         with utils.db_session() as db:
             reply = apply_content_filters(reply, db)
-        # 清理敏感词过滤后可能产生的标题后多余空行
-        import re
-        reply = re.sub(r'^(#{1,6}[^\n]*)\n\s*\n', r'\1\n', reply, flags=re.MULTILINE)
+        # 敏感词过滤后再次调用 normalize_markdown 修复可能被拆分的标题
+        reply = normalize_markdown(reply)
     except Exception:
         pass
     append_history(conversation_id, "assistant", reply)
