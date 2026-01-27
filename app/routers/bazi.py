@@ -6,7 +6,7 @@ from typing import Literal, Optional, List
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, field_validator
 import requests
-from lunar_python import Solar
+from lunar_python import Solar, Lunar
 from lunar_python.eightchar import Yun
 from sqlalchemy.orm import Session
 from ..db import get_db
@@ -142,10 +142,16 @@ def calc_bazi(body: PaipanIn):
         birthday_adjusted = to_birthday_adjusted(body)
         dt_obj = datetime.strptime(birthday_adjusted, "%Y-%m-%d %H:%M:%S")
 
-        # 2) 公历 -> Lunar
-        solar = Solar.fromYmdHms(dt_obj.year, dt_obj.month, dt_obj.day,
-                                 dt_obj.hour, dt_obj.minute, dt_obj.second)
-        lunar = solar.getLunar()
+        # 2) 根据 calendar 类型获取 Lunar 对象
+        if body.calendar == "lunar":
+            # 农历输入：直接使用 Lunar.fromYmdHms() 创建农历对象
+            lunar = Lunar.fromYmdHms(dt_obj.year, dt_obj.month, dt_obj.day,
+                                     dt_obj.hour, dt_obj.minute, dt_obj.second)
+        else:
+            # 公历输入：先创建 Solar 对象，再转换为 Lunar
+            solar = Solar.fromYmdHms(dt_obj.year, dt_obj.month, dt_obj.day,
+                                     dt_obj.hour, dt_obj.minute, dt_obj.second)
+            lunar = solar.getLunar()
 
         # 3) 四柱（清洗成 ["干","支"]）
         four_pillars = {
