@@ -20,7 +20,7 @@ _cache_time: Optional[datetime] = None
 CACHE_TTL = 300  # 5分钟缓存
 
 # 全局开关：设为 False 可禁用敏感词过滤（用于调试）
-FILTER_ENABLED = False
+FILTER_ENABLED = True
 
 
 def get_word_mappings(db: Session) -> list[tuple[str, str, bool]]:
