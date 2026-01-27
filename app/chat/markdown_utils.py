@@ -223,4 +223,9 @@ def normalize_markdown(md: str) -> str:
     # \u2060 (Word Joiner) 可以防止在它前面换行
     s = re.sub(r'^(#{1,6}\s+[^\n]+)\n', r'\1' + '\u2060' + r'\n', s, flags=re.MULTILINE)
 
+    # === 最终清理：确保所有多余空行都被折叠 ===
+    s = re.sub(r'\n{3,}', '\n\n', s)  # 3个以上换行 -> 2个换行
+    # 标题后的空行改为单个换行（减少空白）
+    s = re.sub(r'^(#{1,6}\s+[^\n]+\u2060)\n\n', r'\1\n', s, flags=re.MULTILINE)
+
     return s.strip()
