@@ -108,6 +108,13 @@ def _ensure_blankline_before_list_after_colon(s: str) -> str:
 # 修复：避免在标题行末尾单独产生换行
 _HEADING_SPACE_CONTENT = re.compile(r'^(#{1,6}\s+[\u4e00-\u9fff]+)\s+(?=[\u4e00-\u9fff].)', re.MULTILINE)
 
+# 标题后直接跟着关键词（无空格）的情况
+# 匹配：### 出生结构个人画像总览年柱：乙巳 -> ### 出生结构个人画像总览\n\n年柱：乙巳
+_HEADING_KEYWORD_SPLIT = re.compile(
+    r'^(#{1,6}\s+[^\n]+?)(年柱|月柱|日柱|时柱|性别|起运|大运|流年|命主|日主)([：:].*)$',
+    re.MULTILINE
+)
+
 def _split_heading_content(s: str) -> str:
     """在标题后的第一个空格处添加换行（如果空格后跟中文且后面还有内容）"""
     # 先替换，然后清理可能产生的标题后空行
@@ -115,6 +122,14 @@ def _split_heading_content(s: str) -> str:
     # 移除标题行后立即出现的空行（避免单独的换行导致标题被拆分）
     result = re.sub(r'^(#{1,6}[^\n]*)\n\s*\n', r'\1\n', result, flags=re.MULTILINE)
     return result
+
+
+def _split_heading_keyword(s: str) -> str:
+    """
+    处理标题后直接跟着关键词（无空格）的情况。
+    例如：### 出生结构个人画像总览年柱：乙巳 -> ### 出生结构个人画像总览\n\n年柱：乙巳
+    """
+    return _HEADING_KEYWORD_SPLIT.sub(r'\1\n\n\2\3', s)
 
 
 def normalize_markdown(md: str) -> str:
@@ -150,12 +165,17 @@ def normalize_markdown(md: str) -> str:
             parts = [line.strip()]
             j = i + 1
             need_balance = _paren_balance(parts[0]) > 0
+            seen_blank = False  # 是否已经遇到空行
             while j < len(lines):
                 nxt = lines[j]
                 stripped = nxt.strip()
                 if stripped == "":
+                    seen_blank = True  # 标记遇到空行
                     j += 1
                     continue
+                # 如果已经遇到空行，且不需要平衡括号，则停止合并
+                if seen_blank and not need_balance:
+                    break
                 if need_balance:
                     parts.append(stripped)
                     need_balance = _paren_balance(" ".join(parts)) > 0
@@ -193,11 +213,10 @@ def normalize_markdown(md: str) -> str:
     s = _restore_placeholders(s, inline,  "I")
     s = _restore_placeholders(s, fenced, "F")
 
-    # === 标题后空格处分割内容（暂时禁用，可能与敏感词过滤冲突）===
-    # s = _split_heading_content(s)
+    # === 处理标题后直接跟着关键词的情况 ===
+    s = _split_heading_keyword(s)
 
     # === 新增：标题块强制换行 ===
-    # s = _ensure_blankline_before_list_after_colon(s)
     s = _ensure_heading_blocks(s)
 
     return s.strip()
