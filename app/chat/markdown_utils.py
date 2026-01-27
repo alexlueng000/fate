@@ -57,6 +57,22 @@ def _ensure_heading_blocks(s: str) -> str:
             # 确保前一行空行
             if out and out[-1].strip() != "":
                 out.append("")  # 插入空行
+            # 检查下一行是否是标题的尾部（1-5个中文字符的短行）
+            nxt = lines[i+1] if i+1 < n else None
+            if nxt is not None:
+                nxt_stripped = nxt.strip()
+                # 如果下一行是1-5个中文字符且不是结构行，合并到标题
+                if (len(nxt_stripped) <= 5 and
+                    nxt_stripped and
+                    not _RE_STRUCTURAL.match(nxt) and
+                    all('\u4e00' <= c <= '\u9fff' or c in '，。！？、；：""''（）【】' for c in nxt_stripped)):
+                    out.append(ln.rstrip() + nxt_stripped)
+                    i += 2
+                    # 检查合并后的下一行
+                    nxt2 = lines[i] if i < n else None
+                    if nxt2 is not None and nxt2.strip() != "":
+                        out.append("")
+                    continue
             out.append(ln.rstrip())
             # 确保标题后有一个空行（不重复添加）
             nxt = lines[i+1] if i+1 < n else None

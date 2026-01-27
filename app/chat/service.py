@@ -161,7 +161,14 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
             from .content_filter import apply_content_filters
             with utils.db_session() as db:
                 reply = apply_content_filters(reply, db)
-            # 敏感词过滤后再次调用 normalize_markdown 修复可能被拆分的标题
+            # 修复敏感词过滤后可能被拆分的标题
+            import re
+            reply = re.sub(
+                r'^(#{1,6}\s+.+?)\n([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]{1,5})\n',
+                r'\1\2\n',
+                reply,
+                flags=re.MULTILINE
+            )
             reply = normalize_markdown(reply)
         except Exception:
             pass
@@ -256,7 +263,14 @@ def send_chat(conversation_id: str, message: str, request: Request):
         from .content_filter import apply_content_filters
         with utils.db_session() as db:
             reply = apply_content_filters(reply, db)
-        # 敏感词过滤后再次调用 normalize_markdown 修复可能被拆分的标题
+        # 修复敏感词过滤后可能被拆分的标题
+        import re
+        reply = re.sub(
+            r'^(#{1,6}\s+.+?)\n([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]{1,5})\n',
+            r'\1\2\n',
+            reply,
+            flags=re.MULTILINE
+        )
         reply = normalize_markdown(reply)
     except Exception:
         pass
@@ -321,7 +335,14 @@ def regenerate(conversation_id: str) -> str:
         from .content_filter import apply_content_filters
         with utils.db_session() as db:
             reply = apply_content_filters(reply, db)
-        # 敏感词过滤后再次调用 normalize_markdown 修复可能被拆分的标题
+        # 修复敏感词过滤后可能被拆分的标题
+        import re
+        reply = re.sub(
+            r'^(#{1,6}\s+.+?)\n([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]{1,5})\n',
+            r'\1\2\n',
+            reply,
+            flags=re.MULTILINE
+        )
         reply = normalize_markdown(reply)
     except Exception:
         pass
