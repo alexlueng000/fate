@@ -84,13 +84,18 @@ def _ensure_blankline_before_list_after_colon(s: str) -> str:
     return _COLON_LIST.sub(r"\1\n\n", s)
 
 
-# 标题后第一个空格处添加换行（如果空格后跟中文内容）
+# 标题后第一个空格处添加换行（如果空格后跟中文内容且不是行尾）
 # 匹配：### 八字命盘总览 年柱：... -> ### 八字命盘总览\n年柱：...
-_HEADING_SPACE_CONTENT = re.compile(r'^(#{1,6}\s+[\u4e00-\u9fff]+)\s+(?=[\u4e00-\u9fff])', re.MULTILINE)
+# 修复：避免在标题行末尾单独产生换行
+_HEADING_SPACE_CONTENT = re.compile(r'^(#{1,6}\s+[\u4e00-\u9fff]+)\s+(?=[\u4e00-\u9fff].)', re.MULTILINE)
 
 def _split_heading_content(s: str) -> str:
-    """在标题后的第一个空格处添加换行（如果空格后跟中文）"""
-    return _HEADING_SPACE_CONTENT.sub(r'\1\n', s)
+    """在标题后的第一个空格处添加换行（如果空格后跟中文且后面还有内容）"""
+    # 先替换，然后清理可能产生的标题后空行
+    result = _HEADING_SPACE_CONTENT.sub(r'\1\n', s)
+    # 移除标题行后立即出现的空行（避免单独的换行导致标题被拆分）
+    result = re.sub(r'^(#{1,6}[^\n]*)\n\s*\n', r'\1\n', result, flags=re.MULTILINE)
+    return result
 
 
 def normalize_markdown(md: str) -> str:
