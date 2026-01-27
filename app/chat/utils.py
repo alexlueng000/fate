@@ -309,6 +309,9 @@ class IncrementalNormalizer:
                 from .content_filter import apply_content_filters
                 with db_session() as db:
                     normalized = apply_content_filters(normalized, db)
+                # 清理敏感词过滤后可能产生的标题后多余空行
+                import re
+                normalized = re.sub(r'^(#{1,6}[^\n]*)\n\s*\n', r'\1\n', normalized, flags=re.MULTILINE)
             except Exception:
                 # 过滤失败不影响主流程
                 pass

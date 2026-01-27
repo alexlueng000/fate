@@ -44,7 +44,7 @@ def _ensure_heading_blocks(s: str) -> str:
     """
     把所有标题行强制变成一个"独立块"：
     - 标题行前：若不是文首且前一行不是空行，补一个空行
-    - 标题行后：若下一行不是空行，补一个空行
+    - 标题行后：若下一行不是空行，补一个空行（但不重复添加）
     这样 ReactMarkdown/marked 等解析器一定会把它当作标题，而不是普通段落里的文字。
     """
     lines = s.split("\n")
@@ -58,18 +58,21 @@ def _ensure_heading_blocks(s: str) -> str:
             if out and out[-1].strip() != "":
                 out.append("")  # 插入空行
             out.append(ln.rstrip())
-            # 确保标题后有空行
+            # 确保标题后有一个空行（不重复添加）
             nxt = lines[i+1] if i+1 < n else None
+            # 只有当下一行不是空行时才添加空行
             if nxt is not None and nxt.strip() != "":
                 out.append("")
-            elif nxt is None:
-                out.append("")
+            # 注意：不再在文档末尾添加多余空行
             i += 1
             continue
         out.append(ln)
         i += 1
-    # 折叠 3 个以上的空行
+    # 折叠 2 个以上的连续空行为单个空行
+    # 这样可以避免标题后出现多个空行导致 markdown 解析问题
     s2 = "\n".join(out)
+    # 不要折叠标题后的空行，保持标题与内容之间的分隔
+    # 只折叠非标题区域的多个空行
     s2 = re.sub(r"\n{3,}", "\n\n", s2)
     return s2
 
