@@ -219,8 +219,8 @@ def normalize_markdown(md: str) -> str:
     # === 新增：标题块强制换行 ===
     s = _ensure_heading_blocks(s)
 
-    # === 修复标题换行问题：在标题行末尾（\n\n 前）添加空格 ===
-    # 这样可以防止前端 markdown 解析器在标题最后一个字处断行
-    s = re.sub(r'^(#{1,6}\s+[^\n]+[^\s])\n\n', r'\1 \n\n', s, flags=re.MULTILINE)
+    # === 修复标题换行问题：在标题行末尾添加零宽不换行空格 ===
+    # \u2060 (Word Joiner) 可以防止在它前面换行
+    s = re.sub(r'^(#{1,6}\s+[^\n]+)\n', r'\1' + '\u2060' + r'\n', s, flags=re.MULTILINE)
 
     return s.strip()
