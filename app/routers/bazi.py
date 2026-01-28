@@ -154,15 +154,18 @@ def calc_bazi(body: PaipanIn):
             lunar = solar.getLunar()
 
         # 3) 四柱（清洗成 ["干","支"]）
+        # 注意：必须使用 EightChar 类来获取八字四柱，而不是 Lunar 类
+        # - lunar.getXxxInGanZhi() 返回的是农历干支（以正月初一为年界，以农历月为月界）
+        # - eightChar.getXxx() 返回的是八字干支（以立春为年界，以节气为月界）
+        eight_char = lunar.getEightChar()
         four_pillars = {
-            "year":  _split_ganzhi_to_list(lunar.getYearInGanZhi()),
-            "month": _split_ganzhi_to_list(lunar.getMonthInGanZhi()),
-            "day":   _split_ganzhi_to_list(lunar.getDayInGanZhi()),
-            "hour":  _split_ganzhi_to_list(lunar.getTimeInGanZhi()),
+            "year":  _split_ganzhi_to_list(eight_char.getYear()),
+            "month": _split_ganzhi_to_list(eight_char.getMonth()),
+            "day":   _split_ganzhi_to_list(eight_char.getDay()),
+            "hour":  _split_ganzhi_to_list(eight_char.getTime()),
         }
 
-        # 4) 大运
-        eight_char = lunar.getEightChar()
+        # 4) 大运（复用上面已获取的 eight_char）
         gender_code = 1 if str(body.gender).strip() == "男" else 0
         yun = Yun(eight_char, gender_code)
 
