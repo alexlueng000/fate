@@ -77,7 +77,7 @@ class FeedbackListResponse(BaseModel):
 def create_feedback(
     payload: FeedbackCreate,
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ) -> Feedback:
     """
     提交反馈（可匿名）
