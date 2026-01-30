@@ -81,7 +81,7 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         opening_user_msg = (
             "请基于以上命盘做一份通用且全面的解读，条理清晰，"
             "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
-            "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
+            "结尾需要另起一行提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
         )
 
         messages = [
