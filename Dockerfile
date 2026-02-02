@@ -49,6 +49,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY . .
 
+# ========== 构建知识库索引 ==========
+# 在构建镜像时生成索引，而非运行时
+RUN python kb_rag_mult.py ingest -i ./kb_files -o ./kb_index || echo "KB index build skipped (no files or error)"
+
+# Copy entrypoint script and make it executable
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 # Create non-root user for security
 RUN useradd -m -u 1000 appuser && \
     chown -R appuser:appuser /app
@@ -58,6 +66,10 @@ USER appuser
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
+# ========== 环境模式变量 ==========
+# 默认生产模式，可通过 docker run -e APP_ENV=development 覆盖
+ENV APP_ENV=production
+
 # Expose port
 EXPOSE 8000
 
@@ -65,5 +77,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/api/healthz || exit 1
 
-# Start command with multiple workers
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# ========== 使用启动脚本支持多模式 ==========
+ENTRYPOINT ["/docker-entrypoint.sh"]

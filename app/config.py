@@ -19,6 +19,12 @@ class Settings(BaseSettings):
     )
 
     # -----------------------------
+    # Environment
+    # -----------------------------
+    # "development" | "production"
+    app_env: str = "development"
+
+    # -----------------------------
     # App
     # -----------------------------
     app_name: str = "Bazi AI Backend"
@@ -29,8 +35,8 @@ class Settings(BaseSettings):
     # -----------------------------
     # Database (MySQL)
     # -----------------------------
-    # 建议用 mysql+pymysql://user:pass@host:3306/dbname
-    database_url: str = "mysql+pymysql://fate_app:Turkey414@43.139.4.252:3306/fate"
+    # 默认指向本地开发数据库（安全默认），生产环境必须通过 .env 覆盖
+    database_url: str = "mysql+pymysql://fate_app:Turkey414@127.0.0.1:3306/fate_dev"
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_recycle: int = 3600    # 秒；1小时回收
@@ -80,5 +86,13 @@ class Settings(BaseSettings):
         if not self.cors_allow_origins or self.cors_allow_origins == "*":
             return ["*"]
         return [o.strip() for o in self.cors_allow_origins.split(",") if o.strip()]
+
+    def is_development(self) -> bool:
+        """判断是否为开发环境"""
+        return self.app_env == "development"
+
+    def is_production(self) -> bool:
+        """判断是否为生产环境"""
+        return self.app_env == "production"
 
 settings = Settings()
