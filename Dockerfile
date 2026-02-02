@@ -49,6 +49,11 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Copy application code
 COPY . .
 
+# ========== 复制本地嵌入模型 ==========
+# 使用本地的 bge-small-zh-v1.5 模型，避免构建时下载
+COPY models /app/models
+ENV EMB_MODEL=/app/models/bge-small-zh-v1.5
+
 # ========== 构建知识库索引 ==========
 # 在构建镜像时生成索引，而非运行时
 RUN python kb_rag_mult.py ingest -i ./kb_files -o ./kb_index || echo "KB index build skipped (no files or error)"
