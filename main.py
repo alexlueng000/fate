@@ -4,7 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import Base, engine
+from app.core.logging import setup_logging
+from app.middleware.logging import RequestLoggingMiddleware
 import app.models as models  # 确保模型注册到 Base（修正原先的导入路径）
+
+# 初始化日志系统
+logger = setup_logging(log_level="INFO")
 
 # 说明：为避免 /auth/login 路由冲突，这里不再引入旧的 auth.router
 # from app.routers import chat, bazi, products, orders, payments, users, entitlements, webhooks
@@ -31,6 +36,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # 添加请求日志中间件
+    app.add_middleware(RequestLoggingMiddleware)
 
     # 已有业务
     app.include_router(chat.router, prefix="/api", tags=["chat"])
@@ -61,7 +69,15 @@ def create_app() -> FastAPI:
     @app.get("/api/healthz")
     def healthz():
         return {"status": "ok"}
- 
+
+    @app.on_event("startup")
+    async def startup():
+        logger.info("application_started", version="1.0.0")
+
+    @app.on_event("shutdown")
+    async def shutdown():
+        logger.info("application_stopped")
+
     return app
 
 

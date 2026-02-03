@@ -12,9 +12,12 @@ from app.security import decode_token
 from app.db import get_db
 from app import models
 from app.config import settings
+from app.core.logging import get_logger
 
 from fastapi import Depends, Request, HTTPException, status
 from jose import JWTError
+
+logger = get_logger("auth")
 
 
 # 让 Swagger “Authorize” 按钮可用；虽不必真的走 /auth/login 表单流，但可复用取 token 的机制
@@ -47,7 +50,7 @@ async def get_current_user(
     - 成功解析后用 payload['sub'] 查询用户
     """
 
-    print("token_from_swagger:", token_from_swagger)
+    logger.debug("get_current_user", token_present=bool(token_from_swagger))
 
     token = token_from_swagger or _extract_bearer_token(request)
     if not token:
@@ -59,7 +62,8 @@ async def get_current_user(
         if not sub:
             raise ValueError("Invalid token payload: missing 'sub'")
         user_id = int(sub)
-    except Exception:
+    except Exception as e:
+        logger.warning("token_decode_failed", error=str(e))
         # 统一返回 401，避免泄露细节
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
@@ -93,7 +97,8 @@ async def get_current_user_optional(
         user_id = int(sub)
         user: Optional[models.User] = db.query(models.User).get(user_id)  # type: ignore[arg-type]
         return user
-    except Exception:
+    except Exception as e:
+        logger.debug("get_current_user_optional_failed", error=str(e))
         return None
 
 

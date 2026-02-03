@@ -10,10 +10,10 @@ from app.schemas.chat import (
     ChatRegenerateReq, ChatClearReq, ChatOkResp
 )
 from app.chat.service import start_chat, send_chat, regenerate, clear
+from app.core.logging import get_logger
 import json
-import logging
 
-logger = logging.getLogger(__name__)
+logger = get_logger("chat.router")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.post("/start", response_model=ChatStartResp)
@@ -21,7 +21,7 @@ def chat_start(req: ChatStartReq, request: Request, db: Session = Depends(get_db
     """
     开始会话：支持 SSE（根据 Accept 或 ?stream=1）
     """
-    print("chat_start", req)
+    logger.info("chat_start_request", paipan=req.paipan.model_dump())
     result = start_chat(
         paipan=req.paipan.model_dump(),
         kb_index_dir=req.kb_index_dir,
@@ -34,7 +34,7 @@ def chat_start(req: ChatStartReq, request: Request, db: Session = Depends(get_db
         return result  # type: ignore[return-value]
     # 一次性：返回结构化 JSON
     cid, reply = result
-    print("chat_start", cid, reply)
+    logger.info("chat_start_completed", conversation_id=cid)
     return ChatStartResp(conversation_id=cid, reply=reply)
 
 @router.post("", response_model=ChatSendResp)

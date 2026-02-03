@@ -23,6 +23,9 @@ from .deepseek_client import call_deepseek, call_deepseek_stream
 from .sse import should_stream, sse_pack, sse_response
 from .store import get_conv, set_conv, append_history, clear_history
 from . import utils
+from app.core.logging import get_logger
+
+logger = get_logger("chat")
 
 DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
 
@@ -89,7 +92,7 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
             {"role": "user", "content": opening_user_msg}
         ]
 
-        print("首次对话prompt: ", messages)
+        logger.debug("chat_start_prompt", conversation_id=cid, messages=messages)
 
     # —— 流式 —— #
     if should_stream(request):
@@ -137,13 +140,13 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
                     append_history(cid, "assistant", final)
 
                 total_ms = utils.now_ms() - t0
-                print({
-                    "cid": cid,
-                    "phase_ms": utils.to_ms(spans),
-                    "t_total_ms": total_ms,
-                    "mode": "stream_start",
-                    "kb_topk": kb_topk,
-                })
+                logger.info("chat_completed",
+                    conversation_id=cid,
+                    phase_ms=utils.to_ms(spans),
+                    total_ms=total_ms,
+                    mode="stream_start",
+                    kb_topk=kb_topk
+                )
 
         return sse_response(gen)
 
@@ -176,13 +179,13 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         append_history(cid, "assistant", reply)
 
     total_ms = utils.now_ms() - t0
-    print({
-        "cid": cid,
-        "phase_ms": utils.to_ms(spans),
-        "t_total_ms": total_ms,
-        "mode": "oneshot_start",
-        "kb_topk": kb_topk,
-    })
+    logger.info("chat_completed",
+        conversation_id=cid,
+        phase_ms=utils.to_ms(spans),
+        total_ms=total_ms,
+        mode="oneshot_start",
+        kb_topk=kb_topk
+    )
 
     return cid, reply
 
@@ -225,7 +228,7 @@ def send_chat(conversation_id: str, message: str, request: Request):
     messages.extend(conv["history"][-recentN:])
     messages.append({"role": "user", "content": message})
 
-    print("后续对话prompt: ", message)
+    logger.debug("chat_send_prompt", conversation_id=conversation_id, message=message)
 
     # 流式
     if should_stream(request):

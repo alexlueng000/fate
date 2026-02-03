@@ -15,6 +15,9 @@ from ..schemas_old import BaziComputeRequest, BaziComputeResponse
 from ..services.bazi import compute_bazi_demo, bazi_fingerprint
 from .. import models
 from ..utils import geo_amap
+from app.core.logging import get_logger
+
+logger = get_logger("bazi")
 
 Gender = Literal["男", "女"]
 Calendar = Literal["gregorian", "lunar"]
@@ -136,7 +139,7 @@ def calc_bazi(body: PaipanIn):
       }
     }
     """
-    print("输入参数：", body)
+    logger.info("calc_paipan_request", gender=body.gender, birth_date=body.birth_date, birthplace=body.birthplace)
     try:
         # 1) 解析时间
         birthday_adjusted = to_birthday_adjusted(body)
@@ -178,7 +181,7 @@ def calc_bazi(body: PaipanIn):
                 "pillar": pillar_list  # 若库返回异常或空，会是 []
             })
 
-        print("输出结果：", {"mingpan": {"gender": body.gender, "four_pillars": four_pillars, "dayun": dayun_list}})
+        logger.info("calc_paipan_completed", gender=body.gender, four_pillars=four_pillars)
 
         # 5) 返回同结构
         return {
@@ -189,5 +192,5 @@ def calc_bazi(body: PaipanIn):
             }
         }
     except Exception as e:
-        print("出错：", e)
+        logger.exception("calc_paipan_error", error=str(e))
         return {"error": f"{type(e).__name__}: {e}"}
