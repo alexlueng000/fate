@@ -266,3 +266,118 @@ def validate_invitation_code(
         valid=is_valid,
         message=error_msg if not is_valid else "邀请码有效"
     )
+
+
+# ================================== 密码重置 ==================================
+
+import asyncio
+from app.services.password_reset import (
+    can_send_code,
+    create_reset_code,
+    verify_and_reset_password,
+    CODE_EXPIRE_MINUTES,
+)
+from app.services.email import email_service
+
+
+class SendResetCodeRequest(BaseModel):
+    """发送密码重置验证码请求"""
+    email: EmailStr = Field(..., description="注册邮箱")
+
+
+class SendResetCodeResponse(BaseModel):
+    """发送密码重置验证码响应"""
+    success: bool
+    message: str
+    expires_in: int = Field(default=900, description="验证码有效期（秒）")
+
+
+class ResetPasswordRequest(BaseModel):
+    """重置密码请求"""
+    email: EmailStr = Field(..., description="注册邮箱")
+    code: str = Field(..., min_length=6, max_length=6, description="6位验证码")
+    new_password: str = Field(..., min_length=6, max_length=128, description="新密码")
+
+
+class ResetPasswordResponse(BaseModel):
+    """重置密码响应"""
+    success: bool
+    message: str
+
+
+@router.post("/auth/password-reset/send-code", response_model=SendResetCodeResponse)
+async def send_reset_code(
+    request: Request,
+    payload: SendResetCodeRequest,
+    db: Session = Depends(get_db_tx),
+) -> SendResetCodeResponse:
+    """
+    发送密码重置验证码
+
+    - 验证邮箱是否存在
+    - 检查频率限制（60秒/次）
+    - 检查每日限制（5次/天）
+    - 发送6位数字验证码到邮箱
+    """
+    email = str(payload.email).strip().lower()
+    client_ip = request.client.host if request.client else None
+
+    # 检查频率限制
+    can_send, error_msg = can_send_code(db, email)
+    if not can_send:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=error_msg
+        )
+
+    # 检查邮箱是否存在（为安全起见，即使不存在也返回成功）
+    user = get_by_email(db, email)
+    if not user:
+        # 不暴露邮箱是否存在的信息
+        return SendResetCodeResponse(
+            success=True,
+            message="如果该邮箱已注册，验证码将发送到您的邮箱",
+            expires_in=CODE_EXPIRE_MINUTES * 60
+        )
+
+    # 创建验证码
+    reset_code = create_reset_code(db, email, ip_address=client_ip)
+
+    # 异步发送邮件（不阻塞响应）
+    asyncio.create_task(
+        email_service.send_password_reset_code(email, reset_code.code, CODE_EXPIRE_MINUTES)
+    )
+
+    return SendResetCodeResponse(
+        success=True,
+        message="验证码已发送到您的邮箱，请查收",
+        expires_in=CODE_EXPIRE_MINUTES * 60
+    )
+
+
+@router.post("/auth/password-reset/reset", response_model=ResetPasswordResponse)
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db_tx),
+) -> ResetPasswordResponse:
+    """
+    验证验证码并重置密码
+
+    - 验证验证码是否正确且未过期
+    - 验证失败次数限制（5次）
+    - 重置用户密码
+    """
+    success, message = verify_and_reset_password(
+        db,
+        email=str(payload.email),
+        code=payload.code,
+        new_password=payload.new_password,
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+
+    return ResetPasswordResponse(success=True, message=message)

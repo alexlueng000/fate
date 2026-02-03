@@ -79,6 +79,16 @@ class Settings(BaseSettings):
     wechat_platform_public_key_path: Optional[str] = None
 
     # -----------------------------
+    # SMTP Email
+    # -----------------------------
+    smtp_host: str = "smtp.qq.com"
+    smtp_port: int = 587
+    smtp_username: Optional[str] = "494762262@qq.com"
+    smtp_password: Optional[str] = "nvuvhqmfoajnbggb"
+    smtp_sender: str = "494762262@qq.com"
+    smtp_use_tls: bool = True
+
+    # -----------------------------
     # Helpers
     # -----------------------------
     def cors_origins_list(self) -> List[str]:
