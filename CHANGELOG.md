@@ -4,6 +4,30 @@
 
 ## [Unreleased] - 2026-02-03
 
+### 新增 - 统计分析仪表盘 API
+
+实现管理后台统计分析 API，提供用户、对话、消息等数据统计。
+
+**新增文件：**
+- `app/routers/admin_stats.py` - 统计分析 API 路由
+
+**修改文件：**
+- `main.py` - 注册统计分析路由
+
+**API 端点：**
+- `GET /api/admin/stats/overview` - 总览统计（用户数、对话数、消息数、反馈数）
+- `GET /api/admin/stats/users/trend` - 用户注册趋势（支持 7d/30d/90d）
+- `GET /api/admin/stats/users/source` - 用户来源分布
+- `GET /api/admin/stats/conversations/trend` - 对话趋势
+
+**功能特性：**
+- 实时统计：总用户数、今日/本周/本月新增
+- 活跃用户：7天内登录用户数
+- Token 消耗：prompt_tokens 和 completion_tokens 统计
+- 权限控制：仅管理员可访问
+
+---
+
 ### 新增 - 日志系统
 
 实现完整的结构化日志系统，替换原有的 print 语句。
