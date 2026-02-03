@@ -122,7 +122,7 @@ class EmailService:
         <body>
             <div class="container">
                 <div class="header">
-                    <div class="logo">一盏大师</div>
+                    <div class="logo">易凡文化</div>
                 </div>
                 <p>您好，</p>
                 <p>您正在重置密码，请使用以下验证码：</p>
