@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
+    Text,
     UniqueConstraint,
     Index,
     SmallInteger,
@@ -147,6 +148,13 @@ class User(Base):
         String(45),
         nullable=True,
         comment="最近登录IP（IPv4/IPv6），便于风控与审计（可选）"
+    )
+
+    # === 默认命盘数据 ===
+    default_birth_data: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="默认出生信息 JSON（gender, calendar, birth_date, birth_time, birth_place）"
     )
 
     # === 关联关系（便于反查） ===

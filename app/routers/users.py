@@ -65,6 +65,7 @@ class UserOut(BaseModel):
     nickname: str | None = None
     avatar_url: str | None = None
     is_admin: bool
+    default_birth_data: str | None = None  # 默认命盘数据 JSON
 
 # 登录，注册返回 
 class AuthResponse(BaseModel):
@@ -381,3 +382,48 @@ def reset_password(
         )
 
     return ResetPasswordResponse(success=True, message=message)
+
+
+# ================================== 默认命盘 ==================================
+
+class DefaultBirthDataRequest(BaseModel):
+    """更新默认命盘请求"""
+    gender: str = Field(..., description="性别：男/女")
+    calendar: str = Field(..., description="历法：gregorian/lunar")
+    birth_date: str = Field(..., description="出生日期：YYYY-MM-DD")
+    birth_time: str = Field(..., description="出生时间：HH:MM")
+    birth_place: str = Field(..., description="出生地点")
+
+
+class DefaultBirthDataResponse(BaseModel):
+    """默认命盘响应"""
+    success: bool
+    data: dict | None = None
+
+
+@router.patch("/me/default-birth-data", response_model=DefaultBirthDataResponse)
+def update_default_birth_data(
+    payload: DefaultBirthDataRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_tx)
+) -> DefaultBirthDataResponse:
+    """
+    更新当前用户的默认命盘数据
+    """
+    import json
+    current_user.default_birth_data = json.dumps(payload.model_dump(), ensure_ascii=False)
+    db.commit()
+    return DefaultBirthDataResponse(success=True, data=payload.model_dump())
+
+
+@router.delete("/me/default-birth-data", response_model=DefaultBirthDataResponse)
+def clear_default_birth_data(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db_tx)
+) -> DefaultBirthDataResponse:
+    """
+    清除当前用户的默认命盘数据
+    """
+    current_user.default_birth_data = None
+    db.commit()
+    return DefaultBirthDataResponse(success=True)

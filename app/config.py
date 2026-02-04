@@ -2,7 +2,7 @@
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     # -----------------------------
     # Database (MySQL)
     # -----------------------------
-    # 默认指向本地开发数据库（安全默认），生产环境必须通过 .env 覆盖
-    database_url: str = "mysql+pymysql://fate_app:Turkey414@127.0.0.1:3306/fate_dev"
+    # 开发环境使用默认值，生产环境必须通过 .env 覆盖
+    database_url: str = "mysql+pymysql://fate_app:dev_password@127.0.0.1:3306/fate_dev"
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_recycle: int = 3600    # 秒；1小时回收
@@ -104,5 +104,17 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         """判断是否为生产环境"""
         return self.app_env == "production"
+
+    @model_validator(mode="after")
+    def validate_production_settings(self) -> "Settings":
+        """生产环境下验证必要的配置项"""
+        if self.app_env == "production":
+            if self.jwt_secret == "change-me":
+                raise ValueError("生产环境必须配置 JWT_SECRET，不能使用默认值")
+            if "dev_password" in self.database_url or "fate_dev" in self.database_url:
+                raise ValueError("生产环境必须配置 DATABASE_URL，不能使用开发环境默认值")
+            if self.debug:
+                raise ValueError("生产环境不应启用 debug 模式")
+        return self
 
 settings = Settings()
