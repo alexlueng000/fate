@@ -411,7 +411,11 @@ def update_default_birth_data(
     更新当前用户的默认命盘数据
     """
     import json
-    current_user.default_birth_data = json.dumps(payload.model_dump(), ensure_ascii=False)
+    # 在当前会话中重新查询用户（因为 current_user 来自不同的会话）
+    user = db.query(User).get(current_user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    user.default_birth_data = json.dumps(payload.model_dump(), ensure_ascii=False)
     db.commit()
     return DefaultBirthDataResponse(success=True, data=payload.model_dump())
 
@@ -424,6 +428,10 @@ def clear_default_birth_data(
     """
     清除当前用户的默认命盘数据
     """
-    current_user.default_birth_data = None
+    # 在当前会话中重新查询用户（因为 current_user 来自不同的会话）
+    user = db.query(User).get(current_user.id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    user.default_birth_data = None
     db.commit()
     return DefaultBirthDataResponse(success=True)
