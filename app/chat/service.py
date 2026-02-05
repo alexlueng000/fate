@@ -125,11 +125,18 @@ def start_chat(
         # 4）初始化会话、写入缓存耗时
         with utils.timer("pre_conv_init", spans):
             # 如果用户已登录，创建数据库记录
+            logger.info("start_chat_init", user_id=user_id, db_present=db is not None)
             if user_id and db:
-                db_conv_id = _create_db_conversation(db, user_id, "八字解读")
-                cid = f"conv_{db_conv_id}"  # 使用数据库ID
+                try:
+                    db_conv_id = _create_db_conversation(db, user_id, "八字解读")
+                    cid = f"conv_{db_conv_id}"  # 使用数据库ID
+                    logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid)
+                except Exception as e:
+                    logger.error("db_conversation_create_failed", error=str(e), user_id=user_id)
+                    cid = f"conv_{uuid.uuid4().hex[:8]}"
             else:
                 cid = f"conv_{uuid.uuid4().hex[:8]}"
+                logger.info("anonymous_conversation", cid=cid)
 
             set_conv(cid, {
                 "pinned": composed,
