@@ -16,6 +16,7 @@ from typing import List, Dict, Any, Iterator, Optional
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 
 from .markdown_utils import normalize_markdown
 from .rag import retrieve_kb
@@ -30,9 +31,53 @@ logger = get_logger("chat")
 DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
 
 
+# ===================== 数据库持久化辅助函数 =====================
+
+def _create_db_conversation(db: Session, user_id: int, title: str = "八字解读") -> int:
+    """创建数据库对话记录，返回对话ID"""
+    from app.models.chat import Conversation
+    conv = Conversation(user_id=user_id, title=title)
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv.id
+
+
+def _save_db_message(
+    db: Session,
+    conversation_id: int,
+    user_id: int,
+    role: str,
+    content: str,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    latency_ms: Optional[int] = None
+) -> None:
+    """保存消息到数据库"""
+    from app.models.chat import Message
+    msg = Message(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        role=role,
+        content=content,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        latency_ms=latency_ms,
+    )
+    db.add(msg)
+    db.commit()
+
+
 # ===================== 对话入口 =====================
 
-def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int, request: Request):
+def start_chat(
+    paipan: Dict[str, Any],
+    kb_index_dir: Optional[str],
+    kb_topk: int,
+    request: Request,
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None
+):
     """
     Start a new chat conversation with initial Bazi analysis.
 
@@ -41,12 +86,17 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         kb_index_dir: Knowledge base index directory path
         kb_topk: Number of knowledge base passages to retrieve
         request: FastAPI request object (for streaming detection)
+        user_id: Optional user ID for database persistence
+        db: Optional database session for persistence
 
     Returns:
         StreamingResponse or (conversation_id, reply_text) tuple
     """
     spans: Dict[str, float] = {}
     t0 = utils.now_ms()
+
+    # 数据库对话ID（仅登录用户）
+    db_conv_id: Optional[int] = None
 
     with utils.timer("pre", spans):
         kb_passages: List[str] = []
@@ -74,11 +124,19 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
 
         # 4）初始化会话、写入缓存耗时
         with utils.timer("pre_conv_init", spans):
-            cid = f"conv_{uuid.uuid4().hex[:8]}"
+            # 如果用户已登录，创建数据库记录
+            if user_id and db:
+                db_conv_id = _create_db_conversation(db, user_id, "八字解读")
+                cid = f"conv_{db_conv_id}"  # 使用数据库ID
+            else:
+                cid = f"conv_{uuid.uuid4().hex[:8]}"
+
             set_conv(cid, {
                 "pinned": composed,
                 "history": [],
-                "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX)
+                "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
+                "user_id": user_id,
+                "db_conv_id": db_conv_id,
             })
 
         opening_user_msg = (
@@ -139,13 +197,24 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
                     append_history(cid, "user", opening_user_msg)
                     append_history(cid, "assistant", final)
 
+                    # 数据库持久化（仅登录用户）
+                    if db_conv_id and user_id and db:
+                        try:
+                            latency = int((utils.now_ms() - t0))
+                            _save_db_message(db, db_conv_id, user_id, "user", opening_user_msg)
+                            _save_db_message(db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                            logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
+                        except Exception as e:
+                            logger.error("message_persist_failed", error=str(e), conversation_id=cid)
+
                 total_ms = utils.now_ms() - t0
                 logger.info("chat_completed",
                     conversation_id=cid,
                     phase_ms=utils.to_ms(spans),
                     total_ms=total_ms,
                     mode="stream_start",
-                    kb_topk=kb_topk
+                    kb_topk=kb_topk,
+                    db_conv_id=db_conv_id
                 )
 
         return sse_response(gen)
@@ -162,8 +231,8 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         # Apply sensitive word filtering
         try:
             from .content_filter import apply_content_filters
-            with utils.db_session() as db:
-                reply = apply_content_filters(reply, db)
+            with utils.db_session() as filter_db:
+                reply = apply_content_filters(reply, filter_db)
             # 修复敏感词过滤后可能被拆分的标题
             import re
             reply = re.sub(
@@ -178,19 +247,30 @@ def start_chat(paipan: Dict[str, Any], kb_index_dir: Optional[str], kb_topk: int
         append_history(cid, "user", opening_user_msg)
         append_history(cid, "assistant", reply)
 
+        # 数据库持久化（仅登录用户）
+        if db_conv_id and user_id and db:
+            try:
+                latency = int((utils.now_ms() - t0))
+                _save_db_message(db, db_conv_id, user_id, "user", opening_user_msg)
+                _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
+                logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
+            except Exception as e:
+                logger.error("message_persist_failed", error=str(e), conversation_id=cid)
+
     total_ms = utils.now_ms() - t0
     logger.info("chat_completed",
         conversation_id=cid,
         phase_ms=utils.to_ms(spans),
         total_ms=total_ms,
         mode="oneshot_start",
-        kb_topk=kb_topk
+        kb_topk=kb_topk,
+        db_conv_id=db_conv_id
     )
 
     return cid, reply
 
 
-def send_chat(conversation_id: str, message: str, request: Request):
+def send_chat(conversation_id: str, message: str, request: Request, db: Optional[Session] = None):
     """
     Send a message in an existing conversation.
 
@@ -198,6 +278,7 @@ def send_chat(conversation_id: str, message: str, request: Request):
         conversation_id: Existing conversation ID
         message: User message content
         request: FastAPI request object (for streaming detection)
+        db: Optional database session for persistence
 
     Returns:
         StreamingResponse or reply_text string
@@ -208,6 +289,10 @@ def send_chat(conversation_id: str, message: str, request: Request):
     conv = get_conv(conversation_id)
     if not conv:
         raise ValueError("会话不存在，请先 /chat/start")
+
+    # 获取持久化信息
+    user_id = conv.get("user_id")
+    db_conv_id = conv.get("db_conv_id")
 
     # 查找本地知识库
     kb_dir = conv.get("kb_index_dir")
@@ -229,6 +314,8 @@ def send_chat(conversation_id: str, message: str, request: Request):
     messages.append({"role": "user", "content": message})
 
     logger.debug("chat_send_prompt", conversation_id=conversation_id, message=message)
+
+    t0 = utils.now_ms()
 
     # 流式
     if should_stream(request):
@@ -254,6 +341,16 @@ def send_chat(conversation_id: str, message: str, request: Request):
             finally:
                 append_history(conversation_id, "user", message)
                 append_history(conversation_id, "assistant", final)
+
+                # 数据库持久化（仅登录用户）
+                if db_conv_id and user_id and db:
+                    try:
+                        latency = int((utils.now_ms() - t0))
+                        _save_db_message(db, db_conv_id, user_id, "user", message)
+                        _save_db_message(db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                    except Exception as e:
+                        logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
+
         return sse_response(gen)
 
     # 一次性
@@ -264,8 +361,8 @@ def send_chat(conversation_id: str, message: str, request: Request):
     # Apply sensitive word filtering
     try:
         from .content_filter import apply_content_filters
-        with utils.db_session() as db:
-            reply = apply_content_filters(reply, db)
+        with utils.db_session() as filter_db:
+            reply = apply_content_filters(reply, filter_db)
         # 修复敏感词过滤后可能被拆分的标题
         import re
         reply = re.sub(
@@ -279,6 +376,16 @@ def send_chat(conversation_id: str, message: str, request: Request):
         pass
     append_history(conversation_id, "user", message)
     append_history(conversation_id, "assistant", reply)
+
+    # 数据库持久化（仅登录用户）
+    if db_conv_id and user_id and db:
+        try:
+            latency = int((utils.now_ms() - t0))
+            _save_db_message(db, db_conv_id, user_id, "user", message)
+            _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
+        except Exception as e:
+            logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
+
     return reply
 
 def regenerate(conversation_id: str) -> str:

@@ -46,6 +46,8 @@ def chat_start(
         kb_index_dir=req.kb_index_dir,
         kb_topk=req.kb_topk,
         request=request,
+        user_id=user_id,
+        db=db,
     )
     # 流式：直接返回 StreamingResponse
     from fastapi.responses import StreamingResponse
@@ -60,7 +62,7 @@ def chat_start(
 def chat_send(
     req: ChatSendReq,
     request: Request,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db_tx),
     current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     """
@@ -69,7 +71,7 @@ def chat_send(
     """
     logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
     try:
-        result = send_chat(req.conversation_id, req.message, request)
+        result = send_chat(req.conversation_id, req.message, request, db=db)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
 
