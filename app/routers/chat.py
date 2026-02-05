@@ -1,9 +1,12 @@
 # app/chat/router.py
-from typing import Any
+from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from ..db import get_db
+from ..db import get_db, get_db_tx
+from ..deps import get_current_user_optional
+from ..models import User
+from ..services.quota import QuotaService
 from app.schemas.chat import (
     ChatStartReq, ChatStartResp,
     ChatSendReq, ChatSendResp,
@@ -17,11 +20,27 @@ logger = get_logger("chat.router")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 @router.post("/start", response_model=ChatStartResp)
-def chat_start(req: ChatStartReq, request: Request, db: Session = Depends(get_db)):
+def chat_start(
+    req: ChatStartReq,
+    request: Request,
+    db: Session = Depends(get_db_tx),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     """
     开始会话：支持 SSE（根据 Accept 或 ?stream=1）
+    - 已登录用户会检查配额并记录使用
+    - 未登录用户暂时允许使用（内测阶段）
     """
-    logger.info("chat_start_request", paipan=req.paipan.model_dump())
+    logger.info("chat_start_request", paipan=req.paipan.model_dump(), user_id=current_user.id if current_user else None)
+
+    # 配额检查（仅对已登录用户）
+    user_id = current_user.id if current_user else None
+    if user_id:
+        allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "chat")
+        if not allowed:
+            raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
+        logger.info("quota_consumed", user_id=user_id, remaining=remaining)
+
     result = start_chat(
         paipan=req.paipan.model_dump(),
         kb_index_dir=req.kb_index_dir,
@@ -38,10 +57,17 @@ def chat_start(req: ChatStartReq, request: Request, db: Session = Depends(get_db
     return ChatStartResp(conversation_id=cid, reply=reply)
 
 @router.post("", response_model=ChatSendResp)
-def chat_send(req: ChatSendReq, request: Request, db: Session = Depends(get_db)):
+def chat_send(
+    req: ChatSendReq,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     """
     续聊：支持 SSE（根据 Accept 或 ?stream=1）
+    - 续聊不消耗配额（配额仅在开始对话时消耗）
     """
+    logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
     try:
         result = send_chat(req.conversation_id, req.message, request)
     except ValueError as e:
