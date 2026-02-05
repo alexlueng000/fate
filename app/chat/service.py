@@ -198,12 +198,15 @@ def start_chat(
                     append_history(cid, "assistant", final)
 
                     # 数据库持久化（仅登录用户）
-                    if db_conv_id and user_id and db:
+                    # 注意：流式响应中原 db 会话已关闭，需要创建新会话
+                    if db_conv_id and user_id:
                         try:
-                            latency = int((utils.now_ms() - t0))
-                            _save_db_message(db, db_conv_id, user_id, "user", opening_user_msg)
-                            _save_db_message(db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
-                            logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
+                            from app.db import SessionLocal
+                            with SessionLocal() as new_db:
+                                latency = int((utils.now_ms() - t0))
+                                _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
+                                _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                                logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
                         except Exception as e:
                             logger.error("message_persist_failed", error=str(e), conversation_id=cid)
 
@@ -343,11 +346,14 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
                 append_history(conversation_id, "assistant", final)
 
                 # 数据库持久化（仅登录用户）
-                if db_conv_id and user_id and db:
+                # 注意：流式响应中原 db 会话已关闭，需要创建新会话
+                if db_conv_id and user_id:
                     try:
-                        latency = int((utils.now_ms() - t0))
-                        _save_db_message(db, db_conv_id, user_id, "user", message)
-                        _save_db_message(db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                        from app.db import SessionLocal
+                        with SessionLocal() as new_db:
+                            latency = int((utils.now_ms() - t0))
+                            _save_db_message(new_db, db_conv_id, user_id, "user", message)
+                            _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
                     except Exception as e:
                         logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
 
