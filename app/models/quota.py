@@ -7,6 +7,7 @@ from typing import Optional
 from sqlalchemy import (
     ForeignKey,
     Index,
+    BigInteger,
     Integer,
     String,
     DateTime,
@@ -34,7 +35,7 @@ class UserQuota(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        Integer,
+        BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,

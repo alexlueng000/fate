@@ -33,7 +33,7 @@ class UsageLog(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        Integer,
+        BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
