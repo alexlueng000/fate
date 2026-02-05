@@ -107,7 +107,7 @@ async def get_overview(
 
 @router.get("/users/trend")
 async def get_users_trend(
-    period: str = Query("30d", regex="^(7d|30d|90d)$"),
+    period: str = Query("30d", pattern="^(7d|30d|90d)$"),
     db: Session = Depends(get_db),
     _admin: User = Depends(get_admin_user)
 ):
@@ -172,7 +172,7 @@ async def get_users_source(
 
 @router.get("/conversations/trend")
 async def get_conversations_trend(
-    period: str = Query("7d", regex="^(7d|30d|90d)$"),
+    period: str = Query("7d", pattern="^(7d|30d|90d)$"),
     db: Session = Depends(get_db),
     _admin: User = Depends(get_admin_user)
 ):
@@ -324,7 +324,7 @@ async def set_user_quota(
 
 @router.get("/users/ranking")
 async def get_users_ranking(
-    order_by: str = Query("conversations", regex="^(conversations|messages|tokens)$"),
+    order_by: str = Query("conversations", pattern="^(conversations|messages|tokens)$"),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     _admin: User = Depends(get_admin_user)
