@@ -13,7 +13,7 @@ logger = setup_logging(log_level="INFO")
 
 # 说明：为避免 /auth/login 路由冲突，这里不再引入旧的 auth.router
 # from app.routers import chat, bazi, products, orders, payments, users, entitlements, webhooks
-from app.routers import chat, bazi, users, chat_basic, admin, config_public, kb, invitation_codes, sensitive_words, feedback, admin_stats
+from app.routers import chat, bazi, users, chat_basic, admin, config_public, kb, invitation_codes, sensitive_words, feedback, admin_stats, user_stats
 
 
 def create_app() -> FastAPI:
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(sensitive_words.router, prefix="/api", tags=["sensitive-words"])
     app.include_router(feedback.router, prefix="/api", tags=["feedback"])
     app.include_router(admin_stats.router, prefix="/api", tags=["admin-stats"])
+    app.include_router(user_stats.router, prefix="/api", tags=["user-stats"])
 
     # 未来业务（保留）
     # app.include_router(products.router, prefix="/api/products", tags=["products"])

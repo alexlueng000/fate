@@ -189,12 +189,29 @@ def top_k_cosine(q_vec: np.ndarray, db_vecs: np.ndarray, k: int = 3) -> List[int
     return np.argsort(-sims)[:k].tolist()
 
 # ====== ingest 命令 ======
+# 排除的文件名列表（不应被当作知识库的文件）
+EXCLUDED_FILES = {
+    "requirements.txt",
+    "requirements-dev.txt",
+    "requirements_dev.txt",
+    "dev-requirements.txt",
+    "test-requirements.txt",
+    "README.txt",
+    "LICENSE.txt",
+    "CHANGELOG.txt",
+    "TODO.txt",
+    ".env.txt",
+}
+
 def gather_files(inputs: List[str], use_glob: bool) -> List[str]:
     paths: List[str] = []
     for inp in inputs:
         if os.path.isdir(inp):
             for ext in ("*.txt", "*.docx", "*.doc"):
-                paths.extend(glob.glob(os.path.join(inp, ext)))
+                for f in glob.glob(os.path.join(inp, ext)):
+                    # 排除不应被当作知识库的文件
+                    if os.path.basename(f).lower() not in {x.lower() for x in EXCLUDED_FILES}:
+                        paths.append(f)
         else:
             if use_glob and any(ch in inp for ch in ["*", "?", "["]):
                 paths.extend(glob.glob(inp))

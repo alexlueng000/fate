@@ -113,7 +113,8 @@ async def get_admin_user(
     return current_user
 
 
-def _extract_bearer_token(request: Request) -> str:
+def _extract_bearer_token_strict(request: Request) -> str:
+    """严格版本：没有 token 时抛异常"""
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录")
@@ -123,7 +124,7 @@ def get_current_user_or_401(request: Request) -> int:
     """
     返回 user_id（int）。只做 token 解码，不访问数据库。
     """
-    token = _extract_bearer_token(request)
+    token = _extract_bearer_token_strict(request)
     try:
         payload = decode_token(token)
     except Exception:
