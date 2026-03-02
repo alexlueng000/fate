@@ -5,6 +5,7 @@ from .sensitive_word import SensitiveWord
 from .feedback import Feedback
 from .quota import UserQuota
 from .usage_log import UsageLog
+from .message_rating import MessageRating
 
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "Feedback",
     "UserQuota",
     "UsageLog",
+    "MessageRating",
 ]
