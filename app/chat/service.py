@@ -52,8 +52,8 @@ def _save_db_message(
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
     latency_ms: Optional[int] = None
-) -> None:
-    """保存消息到数据库"""
+) -> int:
+    """保存消息到数据库，返回消息ID"""
     from app.models.chat import Message
     msg = Message(
         conversation_id=conversation_id,
@@ -66,6 +66,8 @@ def _save_db_message(
     )
     db.add(msg)
     db.commit()
+    db.refresh(msg)
+    return msg.id
 
 
 # ===================== 对话入口 =====================
@@ -166,6 +168,7 @@ def start_chat(
             first_byte_seen = False
             normalizer = utils.IncrementalNormalizer(normalize_interval=50)
             final = ""  # 初始化，避免 finally 中访问未定义的变量
+            assistant_msg_id: Optional[int] = None  # 保存assistant消息ID
 
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": cid}}, ensure_ascii=False))
@@ -212,8 +215,10 @@ def start_chat(
                             with SessionLocal() as new_db:
                                 latency = int((utils.now_ms() - t0))
                                 _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
-                                _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
-                                logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
+                                assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                                logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id, assistant_msg_id=assistant_msg_id)
+                                # 发送包含 message_id 的元数据
+                                yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
                         except Exception as e:
                             logger.error("message_persist_failed", error=str(e), conversation_id=cid)
 
@@ -332,6 +337,7 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
         def gen() -> Iterator[bytes]:
             normalizer = utils.IncrementalNormalizer(normalize_interval=50)
             final = ""  # 初始化，避免 finally 中访问未定义的变量
+            assistant_msg_id: Optional[int] = None  # 保存assistant消息ID
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": conversation_id}}, ensure_ascii=False))
                 for delta in call_deepseek_stream(messages):
@@ -360,7 +366,10 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
                         with SessionLocal() as new_db:
                             latency = int((utils.now_ms() - t0))
                             _save_db_message(new_db, db_conv_id, user_id, "user", message)
-                            _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                            assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                            logger.info("messages_persisted", conversation_id=conversation_id, assistant_msg_id=assistant_msg_id)
+                            # 发送包含 message_id 的元数据
+                            yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
                     except Exception as e:
                         logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
 
