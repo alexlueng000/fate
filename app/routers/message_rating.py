@@ -1,7 +1,7 @@
 # app/routers/message_rating.py
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc
 
 from ..db import get_db_tx
@@ -150,15 +150,18 @@ def list_ratings(
     - 支持按评价类型筛选
     - 返回消息内容、用户信息、评价详情
     """
-    query = db.query(MessageRating).join(Message)
-    
+    query = db.query(MessageRating).options(
+        joinedload(MessageRating.message),
+        joinedload(MessageRating.user)
+    )
+
     # 筛选条件
     if rating_type:
         query = query.filter(MessageRating.rating_type == rating_type)
-    
+
     # 总数
     total = query.count()
-    
+
     # 分页
     ratings = (
         query

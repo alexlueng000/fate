@@ -13,7 +13,7 @@ from sqlalchemy import (
     DateTime,
     func,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.mysql import JSON
 
 from app.db import Base
@@ -65,6 +65,10 @@ class MessageRating(Base):
         server_default=func.current_timestamp(),
         nullable=False,
     )
+
+    # 关系
+    message = relationship("Message", backref="ratings")
+    user = relationship("User", backref="message_ratings")
 
     __table_args__ = (
         Index("idx_message_ratings_message_user", "message_id", "user_id", unique=True),
