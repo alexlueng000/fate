@@ -39,6 +39,19 @@ def submit_rating(
 
     user_id = current_user.id if current_user else None
 
+    # 处理理由：如果选择"其他"且提供了自定义理由，使用自定义理由
+    final_reason = req.reason
+    if req.reason == "other" and req.custom_reason:
+        # 验证自定义理由长度
+        custom_text = req.custom_reason.strip()
+        if len(custom_text) < 15:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="自定义理由至少需要15个字"
+            )
+        # 截断到500字符并保存
+        final_reason = custom_text[:500]
+
     # 检查是否已有评价
     existing_rating = (
         db.query(MessageRating)
@@ -50,14 +63,15 @@ def submit_rating(
     if existing_rating:
         # 更新已有评价
         existing_rating.rating_type = req.rating_type
-        existing_rating.reason = req.reason
+        existing_rating.reason = final_reason
         existing_rating.paipan_data = req.paipan_data
         logger.info(
             "rating_updated",
             message_id=message_id,
             user_id=user_id,
             rating_type=req.rating_type,
-            reason=req.reason,
+            reason=final_reason,
+            is_custom=req.reason == "other",
         )
     else:
         # 创建新评价
@@ -65,7 +79,7 @@ def submit_rating(
             message_id=message_id,
             user_id=user_id,
             rating_type=req.rating_type,
-            reason=req.reason,
+            reason=final_reason,
             paipan_data=req.paipan_data,
         )
         db.add(new_rating)
@@ -74,7 +88,8 @@ def submit_rating(
             message_id=message_id,
             user_id=user_id,
             rating_type=req.rating_type,
-            reason=req.reason,
+            reason=final_reason,
+            is_custom=req.reason == "other",
         )
 
     db.commit()

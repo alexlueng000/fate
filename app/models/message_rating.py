@@ -50,7 +50,7 @@ class MessageRating(Base):
     )
 
     reason: Mapped[Optional[str]] = mapped_column(
-        String(50),
+        String(500),  # 扩展到 500 字符以支持自定义理由
         nullable=True,
     )
 
