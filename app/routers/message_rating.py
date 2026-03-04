@@ -1,10 +1,11 @@
 # app/routers/message_rating.py
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from ..db import get_db_tx
-from ..deps import get_current_user_optional
+from ..deps import get_current_user_optional, get_admin_user
 from ..models import User, MessageRating, Message
 from ..schemas.message_rating import (
     MessageRatingCreate,
@@ -132,3 +133,66 @@ def get_rating(
         )
 
     return UserRatingResp(message_id=message_id, user_rating=rating_resp)
+
+
+# ================================== 管理员接口 ==================================
+
+@router.get("/admin/ratings", tags=["admin"])
+def list_ratings(
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    rating_type: Optional[str] = Query(None, description="评价类型筛选: up/down"),
+    db: Session = Depends(get_db_tx),
+    admin: User = Depends(get_admin_user),
+):
+    """
+    管理员获取消息评价列表（分页）
+    - 支持按评价类型筛选
+    - 返回消息内容、用户信息、评价详情
+    """
+    query = db.query(MessageRating).join(Message)
+    
+    # 筛选条件
+    if rating_type:
+        query = query.filter(MessageRating.rating_type == rating_type)
+    
+    # 总数
+    total = query.count()
+    
+    # 分页
+    ratings = (
+        query
+        .order_by(desc(MessageRating.created_at))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    
+    # 构建响应
+    items = []
+    for rating in ratings:
+        message = rating.message
+        user = rating.user
+        
+        item = {
+            "id": rating.id,
+            "message_id": rating.message_id,
+            "message_content": message.content if message else None,
+            "message_role": message.role if message else None,
+            "message_created_at": message.created_at.isoformat() if message else None,
+            "rating_type": rating.rating_type,
+            "reason": rating.reason,
+            "paipan_data": rating.paipan_data,
+            "created_at": rating.created_at.isoformat(),
+            "user_id": rating.user_id,
+            "user_email": user.email if user else None,
+            "user_username": user.username if user else None,
+        }
+        items.append(item)
+    
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
