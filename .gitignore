@@ -37,3 +37,5 @@ alembic/
 tmp*
 
 docs/
+# 知识库文档（不提交到版本库）
+*.docx
