@@ -482,6 +482,42 @@ def regenerate(conversation_id: str) -> str:
     return reply
 
 
+def simplify_message(message_content: str, request: Request):
+    """
+    Rewrite professional Bazi analysis into plain Chinese (白话版).
+    Does not read or write conversation history.
+    """
+    system_prompt = (
+        "你是命理内容转化助手。将用户提供的专业命理解读改写为大众白话文。\n"
+        "要求：\n"
+        "1. 保留核心结论，不添加原文没有的内容\n"
+        "2. 专业术语用括号附简单解释（如：印星（代表贵人和支持力量））\n"
+        "3. 语言口语化亲切，避免晦涩词汇\n"
+        "4. 长度控制在原文50-70%\n"
+        "5. 直接输出改写后的内容，不要任何前言"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"请将以下命理解读改写为白话文：\n\n{message_content}"},
+    ]
+
+    if should_stream(request):
+        def gen() -> Iterator[bytes]:
+            try:
+                for delta in call_deepseek_stream(messages):
+                    if not delta:
+                        continue
+                    yield sse_pack(json.dumps({"text": delta}, ensure_ascii=False))
+                yield sse_pack("[DONE]")
+            except Exception as e:
+                yield sse_pack(f"[ERROR]{str(e)}")
+
+        return sse_response(gen)
+
+    reply = call_deepseek(messages)
+    return {"content": reply}
+
+
 def clear(conversation_id: str) -> Dict[str, bool]:
     """
     Clear conversation history while keeping the system prompt.

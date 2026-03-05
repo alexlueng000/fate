@@ -81,3 +81,7 @@ class ChatClearReq(BaseModel):
 class ChatOkResp(BaseModel):
     ok: bool
     conversation_id: str
+
+class ChatSimplifyReq(BaseModel):
+    message_content: str
+    conversation_id: Optional[str] = None

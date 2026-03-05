@@ -10,9 +10,10 @@ from ..services.quota import QuotaService
 from app.schemas.chat import (
     ChatStartReq, ChatStartResp,
     ChatSendReq, ChatSendResp,
-    ChatRegenerateReq, ChatClearReq, ChatOkResp
+    ChatRegenerateReq, ChatClearReq, ChatOkResp,
+    ChatSimplifyReq,
 )
-from app.chat.service import start_chat, send_chat, regenerate, clear
+from app.chat.service import start_chat, send_chat, regenerate, clear, simplify_message
 from app.core.logging import get_logger
 import json
 
@@ -91,6 +92,18 @@ def chat_regenerate(req: ChatRegenerateReq, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
     return ChatSendResp(conversation_id=req.conversation_id, reply=reply)
+
+
+@router.post("/simplify")
+def chat_simplify(req: ChatSimplifyReq, request: Request):
+    """
+    将一条 AI 消息内容转化为白话版，流式返回，不影响会话历史。
+    """
+    from fastapi.responses import StreamingResponse
+    result = simplify_message(req.message_content, request)
+    if isinstance(result, StreamingResponse):
+        return result  # type: ignore[return-value]
+    return result
 
 
 @router.post("/clear", response_model=ChatOkResp)
