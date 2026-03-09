@@ -33,14 +33,63 @@ DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 # ===================== 数据库持久化辅助函数 =====================
 
-def _create_db_conversation(db: Session, user_id: int, title: str = "八字解读") -> int:
+def _create_db_conversation(db: Session, user_id: int, title: str = "八字解读", system_prompt: str = "") -> int:
     """创建数据库对话记录，返回对话ID"""
     from app.models.chat import Conversation
-    conv = Conversation(user_id=user_id, title=title)
+    conv = Conversation(user_id=user_id, title=title, system_prompt=system_prompt)
     db.add(conv)
     db.commit()
     db.refresh(conv)
     return conv.id
+
+
+def _recover_conv_from_db(conversation_id: str, user_id: Optional[int]) -> bool:
+    """
+    从数据库恢复会话到内存（用于多进程/重启后会话丢失场景）。
+    仅恢复已登录用户自己的会话（带 user_id 校验，防止数据错乱）。
+    返回是否恢复成功。
+    """
+    if not user_id:
+        return False
+
+    # conversation_id 格式为 conv_{db_id}，解析出数字 ID
+    if not conversation_id.startswith("conv_"):
+        return False
+    raw_id = conversation_id[len("conv_"):]
+    if not raw_id.isdigit():
+        return False
+    db_conv_id = int(raw_id)
+
+    try:
+        from app.db import SessionLocal
+        from app.models.chat import Conversation, Message
+        with SessionLocal() as db:
+            conv = db.query(Conversation).filter(
+                Conversation.id == db_conv_id,
+                Conversation.user_id == user_id,  # 所有权校验，防止用户间数据错乱
+            ).first()
+            if not conv or not conv.system_prompt:
+                return False
+
+            # 从数据库加载消息历史
+            messages = db.query(Message).filter(
+                Message.conversation_id == db_conv_id,
+            ).order_by(Message.id.asc()).all()
+            history = [{"role": m.role, "content": m.content} for m in messages
+                       if m.role in ("user", "assistant")]
+
+            set_conv(conversation_id, {
+                "pinned": conv.system_prompt,
+                "history": history,
+                "kb_index_dir": DEFAULT_KB_INDEX,
+                "user_id": user_id,
+                "db_conv_id": db_conv_id,
+            })
+            logger.info("conv_recovered_from_db", conversation_id=conversation_id, db_conv_id=db_conv_id, history_len=len(history))
+            return True
+    except Exception as e:
+        logger.error("conv_recover_failed", conversation_id=conversation_id, error=str(e))
+        return False
 
 
 def _save_db_message(
@@ -130,7 +179,7 @@ def start_chat(
             logger.info("start_chat_init", user_id=user_id, db_present=db is not None)
             if user_id and db:
                 try:
-                    db_conv_id = _create_db_conversation(db, user_id, "八字解读")
+                    db_conv_id = _create_db_conversation(db, user_id, "八字解读", system_prompt=composed)
                     cid = f"conv_{db_conv_id}"  # 使用数据库ID
                     logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid)
                 except Exception as e:
@@ -285,7 +334,7 @@ def start_chat(
     return cid, reply
 
 
-def send_chat(conversation_id: str, message: str, request: Request, db: Optional[Session] = None):
+def send_chat(conversation_id: str, message: str, request: Request, user_id: Optional[int] = None, db: Optional[Session] = None):
     """
     Send a message in an existing conversation.
 
@@ -293,16 +342,26 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
         conversation_id: Existing conversation ID
         message: User message content
         request: FastAPI request object (for streaming detection)
+        user_id: Current user ID for ownership check and DB recovery
         db: Optional database session for persistence
 
     Returns:
         StreamingResponse or reply_text string
 
     Raises:
-        ValueError: If conversation doesn't exist
+        ValueError: If conversation doesn't exist or user doesn't own it
     """
     conv = get_conv(conversation_id)
     if not conv:
+        # 多进程/重启后内存丢失，尝试从数据库恢复（带所有权校验）
+        recovered = _recover_conv_from_db(conversation_id, user_id)
+        if not recovered:
+            raise ValueError("会话不存在，请先 /chat/start")
+        conv = get_conv(conversation_id)
+
+    # 所有权校验：已登录用户只能访问自己的会话
+    conv_user_id = conv.get("user_id")
+    if user_id and conv_user_id and conv_user_id != user_id:
         raise ValueError("会话不存在，请先 /chat/start")
 
     # 获取持久化信息
@@ -410,12 +469,13 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
 
     return reply
 
-def regenerate(conversation_id: str) -> str:
+def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     """
     Regenerate the last AI response in a conversation.
 
     Args:
         conversation_id: Existing conversation ID
+        user_id: Current user ID for ownership check and DB recovery
 
     Returns:
         Newly generated reply text
@@ -425,6 +485,14 @@ def regenerate(conversation_id: str) -> str:
     """
     conv = get_conv(conversation_id)
     if not conv:
+        recovered = _recover_conv_from_db(conversation_id, user_id)
+        if not recovered:
+            raise ValueError("会话不存在，请先 /chat/start")
+        conv = get_conv(conversation_id)
+
+    # 所有权校验
+    conv_user_id = conv.get("user_id")
+    if user_id and conv_user_id and conv_user_id != user_id:
         raise ValueError("会话不存在，请先 /chat/start")
 
     history = conv.get("history", [])

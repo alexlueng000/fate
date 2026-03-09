@@ -47,6 +47,12 @@ class Conversation(Base):
         default="未命名会话",
     )
 
+    # 存储完整 composed system prompt，用于多进程/重启后从 DB 恢复内存会话
+    system_prompt: Mapped[Optional[str]] = mapped_column(
+        mysql.MEDIUMTEXT().with_variant(Text, "sqlite"),
+        nullable=True,
+    )
+
     # MySQL TIMESTAMP 无 tz；用 server_default/ onupdate 跟随数据库
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),

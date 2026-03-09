@@ -71,8 +71,9 @@ def chat_send(
     - 续聊不消耗配额（配额仅在开始对话时消耗）
     """
     logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
+    user_id = current_user.id if current_user else None
     try:
-        result = send_chat(req.conversation_id, req.message, request, db=db)
+        result = send_chat(req.conversation_id, req.message, request, user_id=user_id, db=db)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
 
@@ -83,12 +84,17 @@ def chat_send(
     return ChatSendResp(conversation_id=req.conversation_id, reply=result)
 
 @router.post("/regenerate", response_model=ChatSendResp)
-def chat_regenerate(req: ChatRegenerateReq, db: Session = Depends(get_db)):
+def chat_regenerate(
+    req: ChatRegenerateReq,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     """
     重新生成上一条 Assistant 回复（一次性）
     """
+    user_id = current_user.id if current_user else None
     try:
-        reply = regenerate(req.conversation_id)
+        reply = regenerate(req.conversation_id, user_id=user_id)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
     return ChatSendResp(conversation_id=req.conversation_id, reply=reply)
