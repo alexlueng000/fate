@@ -199,7 +199,7 @@ async def websocket_chat(websocket: WebSocket):
             base_prompt = load_system_prompt_from_db()
             composed = build_full_system_prompt(
                 base_prompt,
-                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"]},
+                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"], "solar_date": paipan.get("solar_date")},
                 kb_passages
             )
 

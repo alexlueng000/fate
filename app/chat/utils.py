@@ -349,8 +349,12 @@ def build_full_system_prompt(
     fp_text = format_four_pillars(mingpan["four_pillars"])
     dy_text = format_dayun(mingpan["dayun"])
     gender = mingpan.get("gender", "")
+    solar_date = mingpan.get("solar_date") or ""
     composed = (base_prompt or "")
     composed = composed.replace("{{GENDER}}", gender).replace("{{FOUR_PILLARS}}", fp_text).replace("{{DAYUN}}", dy_text)
+    # 在四柱前注入公历出生日期，防止 AI 自行推算出错
+    if solar_date:
+        composed = f"【用户公历出生日期（真太阳时）：{solar_date}】\n\n{composed}"
     if kb_passages:
         kb_block = "\n\n".join(kb_passages[:3])
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
