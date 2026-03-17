@@ -572,17 +572,25 @@ def simplify_message(message_content: str, request: Request):
     if should_stream(request):
         def gen() -> Iterator[bytes]:
             try:
+                normalizer = utils.IncrementalNormalizer(normalize_interval=50)
                 for delta in call_deepseek_stream(messages):
                     if not delta:
                         continue
-                    yield sse_pack(json.dumps({"text": delta}, ensure_ascii=False))
+                    clean = normalizer.append(delta)
+                    if clean:
+                        yield sse_pack(json.dumps({"text": clean, "replace": True}, ensure_ascii=False))
+                final = normalizer.finalize()
+                yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
             except Exception as e:
                 yield sse_pack(f"[ERROR]{str(e)}")
 
         return sse_response(gen)
 
-    reply = call_deepseek(messages)
+    reply = normalize_markdown(call_deepseek(messages)).strip()
+    reply = utils.scrub_br_block(reply)
+    reply = utils.collapse_double_newlines(reply)
+    reply = utils.third_sub(reply)
     return {"content": reply}
 
 
