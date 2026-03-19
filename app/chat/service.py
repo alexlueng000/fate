@@ -285,7 +285,7 @@ def start_chat(
     return cid, reply
 
 
-def send_chat(conversation_id: str, message: str, request: Request, db: Optional[Session] = None):
+def send_chat(conversation_id: str, message: str, request: Request, user_id: Optional[int] = None, db: Optional[Session] = None):
     """
     Send a message in an existing conversation.
 
@@ -293,16 +293,22 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
         conversation_id: Existing conversation ID
         message: User message content
         request: FastAPI request object (for streaming detection)
+        user_id: Current user ID for ownership check and DB recovery
         db: Optional database session for persistence
 
     Returns:
         StreamingResponse or reply_text string
 
     Raises:
-        ValueError: If conversation doesn't exist
+        ValueError: If conversation doesn't exist or user doesn't own it
     """
     conv = get_conv(conversation_id)
     if not conv:
+        raise ValueError("会话不存在，请先 /chat/start")
+
+    # 所有权校验：已登录用户只能访问自己的会话
+    conv_user_id = conv.get("user_id")
+    if user_id and conv_user_id and conv_user_id != user_id:
         raise ValueError("会话不存在，请先 /chat/start")
 
     # 获取持久化信息
@@ -410,12 +416,13 @@ def send_chat(conversation_id: str, message: str, request: Request, db: Optional
 
     return reply
 
-def regenerate(conversation_id: str) -> str:
+def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     """
     Regenerate the last AI response in a conversation.
 
     Args:
         conversation_id: Existing conversation ID
+        user_id: Current user ID for ownership check and DB recovery
 
     Returns:
         Newly generated reply text
@@ -425,6 +432,11 @@ def regenerate(conversation_id: str) -> str:
     """
     conv = get_conv(conversation_id)
     if not conv:
+        raise ValueError("会话不存在，请先 /chat/start")
+
+    # 所有权校验
+    conv_user_id = conv.get("user_id")
+    if user_id and conv_user_id and conv_user_id != user_id:
         raise ValueError("会话不存在，请先 /chat/start")
 
     history = conv.get("history", [])
@@ -480,6 +492,50 @@ def regenerate(conversation_id: str) -> str:
         pass
     append_history(conversation_id, "assistant", reply)
     return reply
+
+
+def simplify_message(message_content: str, request: Request):
+    """
+    Rewrite professional Bazi analysis into plain Chinese (白话版).
+    Does not read or write conversation history.
+    """
+    system_prompt = (
+        "你是命理内容转化助手。将用户提供的专业命理解读改写为大众白话文。\n"
+        "要求：\n"
+        "1. 保留核心结论，不添加原文没有的内容\n"
+        "2. 专业术语用括号附简单解释（如：印星（代表贵人和支持力量））\n"
+        "3. 语言口语化亲切，避免晦涩词汇\n"
+        "4. 长度控制在原文50-70%\n"
+        "5. 直接输出改写后的内容，不要任何前言"
+    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": f"请将以下命理解读改写为白话文：\n\n{message_content}"},
+    ]
+
+    if should_stream(request):
+        def gen() -> Iterator[bytes]:
+            try:
+                normalizer = utils.IncrementalNormalizer(normalize_interval=50)
+                for delta in call_deepseek_stream(messages):
+                    if not delta:
+                        continue
+                    clean = normalizer.append(delta)
+                    if clean:
+                        yield sse_pack(json.dumps({"text": clean, "replace": True}, ensure_ascii=False))
+                final = normalizer.finalize()
+                yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
+                yield sse_pack("[DONE]")
+            except Exception as e:
+                yield sse_pack(f"[ERROR]{str(e)}")
+
+        return sse_response(gen)
+
+    reply = normalize_markdown(call_deepseek(messages)).strip()
+    reply = utils.scrub_br_block(reply)
+    reply = utils.collapse_double_newlines(reply)
+    reply = utils.third_sub(reply)
+    return {"content": reply}
 
 
 def clear(conversation_id: str) -> Dict[str, bool]:

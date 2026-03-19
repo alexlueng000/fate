@@ -10,9 +10,10 @@ from ..services.quota import QuotaService
 from app.schemas.chat import (
     ChatStartReq, ChatStartResp,
     ChatSendReq, ChatSendResp,
-    ChatRegenerateReq, ChatClearReq, ChatOkResp
+    ChatRegenerateReq, ChatClearReq, ChatOkResp,
+    ChatSimplifyReq,
 )
-from app.chat.service import start_chat, send_chat, regenerate, clear
+from app.chat.service import start_chat, send_chat, regenerate, clear, simplify_message
 from app.core.logging import get_logger
 import json
 
@@ -70,8 +71,9 @@ def chat_send(
     - 续聊不消耗配额（配额仅在开始对话时消耗）
     """
     logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
+    user_id = current_user.id if current_user else None
     try:
-        result = send_chat(req.conversation_id, req.message, request, db=db)
+        result = send_chat(req.conversation_id, req.message, request, user_id=user_id, db=db)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
 
@@ -82,15 +84,32 @@ def chat_send(
     return ChatSendResp(conversation_id=req.conversation_id, reply=result)
 
 @router.post("/regenerate", response_model=ChatSendResp)
-def chat_regenerate(req: ChatRegenerateReq, db: Session = Depends(get_db)):
+def chat_regenerate(
+    req: ChatRegenerateReq,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
     """
     重新生成上一条 Assistant 回复（一次性）
     """
+    user_id = current_user.id if current_user else None
     try:
-        reply = regenerate(req.conversation_id)
+        reply = regenerate(req.conversation_id, user_id=user_id)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
     return ChatSendResp(conversation_id=req.conversation_id, reply=reply)
+
+
+@router.post("/simplify")
+def chat_simplify(req: ChatSimplifyReq, request: Request):
+    """
+    将一条 AI 消息内容转化为白话版，流式返回，不影响会话历史。
+    """
+    from fastapi.responses import StreamingResponse
+    result = simplify_message(req.message_content, request)
+    if isinstance(result, StreamingResponse):
+        return result  # type: ignore[return-value]
+    return result
 
 
 @router.post("/clear", response_model=ChatOkResp)
@@ -180,7 +199,7 @@ async def websocket_chat(websocket: WebSocket):
             base_prompt = load_system_prompt_from_db()
             composed = build_full_system_prompt(
                 base_prompt,
-                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"]},
+                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"], "solar_date": paipan.get("solar_date")},
                 kb_passages
             )
 

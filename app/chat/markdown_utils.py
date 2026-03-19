@@ -57,30 +57,47 @@ def _ensure_heading_blocks(s: str) -> str:
             # 确保前一行空行
             if out and out[-1].strip() != "":
                 out.append("")  # 插入空行
-            # 检查下一行是否是标题的尾部（1-5个中文字符的短行）
-            nxt = lines[i+1] if i+1 < n else None
-            if nxt is not None:
-                nxt_stripped = nxt.strip()
-                # 如果下一行是1-5个中文字符且不是结构行，合并到标题
-                if (len(nxt_stripped) <= 5 and
-                    nxt_stripped and
-                    not _RE_STRUCTURAL.match(nxt) and
-                    all('\u4e00' <= c <= '\u9fff' or c in '，。！？、；：""''（）【】' for c in nxt_stripped)):
-                    out.append(ln.rstrip() + nxt_stripped)
-                    i += 2
-                    # 检查合并后的下一行
-                    nxt2 = lines[i] if i < n else None
-                    if nxt2 is not None and nxt2.strip() != "":
-                        out.append("")
-                    continue
-            out.append(ln.rstrip())
-            # 确保标题后有一个空行（不重复添加）
-            nxt = lines[i+1] if i+1 < n else None
-            # 只有当下一行不是空行时才添加空行
-            if nxt is not None and nxt.strip() != "":
-                out.append("")
-            # 注意：不再在文档末尾添加多余空行
-            i += 1
+
+            merged = False
+            check_idx = i + 1
+
+            if check_idx < n:
+                imm = lines[check_idx]
+                imm_stripped = imm.strip()
+
+                if imm_stripped == "":
+                    # 下一行是空行 → 再往后看一行，捕获隔了空行的孤字尾（≤2个汉字）
+                    peek_idx = check_idx + 1
+                    if peek_idx < n:
+                        peek = lines[peek_idx].strip()
+                        if (1 <= len(peek) <= 2 and
+                            not _RE_STRUCTURAL.match(lines[peek_idx]) and
+                            all('\u4e00' <= c <= '\u9fff' or c in '，。！？、；：""''（）【】' for c in peek)):
+                            out.append(ln.rstrip() + peek)
+                            i = peek_idx + 1
+                            nxt2 = lines[i] if i < n else None
+                            if nxt2 is not None and nxt2.strip() != "":
+                                out.append("")
+                            merged = True
+                else:
+                    # 下一行非空 → 原有逻辑（≤5个汉字合并）
+                    if (len(imm_stripped) <= 5 and
+                        not _RE_STRUCTURAL.match(imm) and
+                        all('\u4e00' <= c <= '\u9fff' or c in '，。！？、；：""''（）【】' for c in imm_stripped)):
+                        out.append(ln.rstrip() + imm_stripped)
+                        i += 2
+                        nxt2 = lines[i] if i < n else None
+                        if nxt2 is not None and nxt2.strip() != "":
+                            out.append("")
+                        merged = True
+
+            if not merged:
+                out.append(ln.rstrip())
+                # 确保标题后有一个空行（不重复添加）
+                nxt = lines[i+1] if i+1 < n else None
+                if nxt is not None and nxt.strip() != "":
+                    out.append("")
+                i += 1
             continue
         out.append(ln)
         i += 1

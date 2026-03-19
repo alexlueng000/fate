@@ -183,12 +183,13 @@ def calc_bazi(body: PaipanIn):
 
         logger.info("calc_paipan_completed", gender=body.gender, four_pillars=four_pillars)
 
-        # 5) 返回同结构
+        # 5) 返回同结构（含真太阳时校正后的公历日期，供 AI 直接引用）
         return {
             "mingpan": {
                 "gender": body.gender,
                 "four_pillars": four_pillars,
-                "dayun": dayun_list
+                "dayun": dayun_list,
+                "solar_date": birthday_adjusted,   # "YYYY-MM-DD HH:MM:SS"（真太阳时）
             }
         }
     except Exception as e:
