@@ -572,7 +572,7 @@ def simplify_message(message_content: str, request: Request):
     if should_stream(request):
         def gen() -> Iterator[bytes]:
             try:
-                for delta in call_deepseek_stream(messages):
+                for delta in call_deepseek_stream(messages, model="deepseek-chat"):
                     if not delta:
                         continue
                     yield sse_pack(json.dumps({"text": delta}, ensure_ascii=False))
@@ -582,7 +582,7 @@ def simplify_message(message_content: str, request: Request):
 
         return sse_response(gen)
 
-    reply = call_deepseek(messages)
+    reply = call_deepseek(messages, model="deepseek-chat")
     return {"content": reply}
 
 
