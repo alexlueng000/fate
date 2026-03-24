@@ -9,12 +9,13 @@ load_dotenv()
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
+# 全局默认模型，如果环境变量未设置，使用 deepseek-chat
 DEEPSEEK_MODEL   = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
-def call_deepseek(messages: List[Dict[str, str]]) -> str:
+def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     payload = {
-        "model": DEEPSEEK_MODEL,
+        "model": model or DEEPSEEK_MODEL,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 8192
@@ -26,13 +27,13 @@ def call_deepseek(messages: List[Dict[str, str]]) -> str:
     # print("call_deepseek", data)
     return data["choices"][0]["message"]["content"]
 
-def call_deepseek_stream(messages: List[Dict[str, str]]) -> Iterator[str]:
+def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = None) -> Iterator[str]:
     """
     边读边 yield 文本增量；兼容 OpenAI SSE：每行 'data: {...}'，我们只提取 delta.content。
     """
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     payload = {
-        "model": DEEPSEEK_MODEL,
+        "model": model or DEEPSEEK_MODEL,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 8192,
