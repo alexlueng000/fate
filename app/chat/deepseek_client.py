@@ -2,7 +2,7 @@
 import os
 import json
 import requests
-from typing import Dict, List, Iterator, Any
+from typing import Dict, List, Iterator, Any, Optional
 from dotenv import load_dotenv
 
 load_dotenv()
