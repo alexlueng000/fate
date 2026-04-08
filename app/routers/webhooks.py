@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db_tx
 from app.models import WebhookLog, Order
 from app.services import payments as pay_service
-from app.services import entitlements as ent_service
+from app.services.quota import QuotaService
 from app.config import settings
 
 # cryptography for RSA verify & AES-GCM decrypt
@@ -139,7 +139,7 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
                 # ✅ 发放权益：基于订单的用户与商品编码（lazy-load OK）
-                ent_service.grant(db, user=order.user, product_code=order.product.code)  # type: ignore[attr-defined]
+                QuotaService.add_quota(db, order.user_id, order.product.quota_amount, "chat", "purchase")  # type: ignore[attr-defined]
 
                 processed = True
 
@@ -162,7 +162,7 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
                 # ✅ 发放权益（开发模式同样执行）
-                ent_service.grant(db, user=order.user, product_code=order.product.code)  # type: ignore[attr-defined]
+                QuotaService.add_quota(db, order.user_id, order.product.quota_amount, "chat", "purchase")  # type: ignore[attr-defined]
 
                 processed = True
 
@@ -179,3 +179,50 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
             _log_webhook(db, source="WECHAT", event_type=None, payload_text=payload_text, processed=False)
         finally:
             return {"code": "FAIL", "message": "internal error"}, 500
+
+
+@router.post("/alipay", response_class=None)
+async def alipay_callback(request: Request, db: Session = Depends(get_db_tx)):
+    """
+    支付宝异步通知回调：
+    - prod：需验证支付宝签名（TODO：接入支付宝 SDK）
+    - dev ：直接处理 form-data 或 JSON，便于联调
+    成功时：标记支付成功 + 发放配额
+    返回 "success" 纯文本（支付宝要求）
+    """
+    from fastapi.responses import PlainTextResponse
+
+    body_bytes = await request.body()
+    payload_text = body_bytes.decode("utf-8") or "{}"
+
+    try:
+        # 支付宝异步通知为 form-encoded；dev 模式也支持 JSON
+        content_type = request.headers.get("Content-Type", "")
+        if "application/json" in content_type:
+            import json
+            data = json.loads(payload_text)
+        else:
+            from urllib.parse import parse_qs
+            qs = parse_qs(payload_text)
+            data = {k: v[0] for k, v in qs.items()}
+
+        out_trade_no = data.get("out_trade_no")
+        trade_no = data.get("trade_no", "alipay_dev_txn")
+        trade_status = data.get("trade_status", "TRADE_SUCCESS")
+
+        processed = False
+        if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED") and out_trade_no:
+            order = db.query(Order).filter(Order.out_trade_no == str(out_trade_no)).first()  # type: ignore
+            if order:
+                pay_service.mark_success(db, order=order, transaction_id=str(trade_no), raw=payload_text)
+                QuotaService.add_quota(db, order.user_id, order.product.quota_amount, "chat", "purchase")  # type: ignore[attr-defined]
+                processed = True
+
+        _log_webhook(db, source="ALIPAY", event_type=trade_status, payload_text=payload_text, processed=processed)
+        return PlainTextResponse("success")
+
+    except Exception:
+        try:
+            _log_webhook(db, source="ALIPAY", event_type=None, payload_text=payload_text, processed=False)
+        finally:
+            return PlainTextResponse("fail")
