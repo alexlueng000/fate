@@ -6,6 +6,11 @@ from .feedback import Feedback
 from .quota import UserQuota
 from .usage_log import UsageLog
 from .message_rating import MessageRating
+from .product import Product
+from .order import Order
+from .payment import Payment
+from .entitlement import Entitlement
+from .webhook_log import WebhookLog
 
 
 __all__ = [
@@ -19,4 +24,9 @@ __all__ = [
     "UserQuota",
     "UsageLog",
     "MessageRating",
+    "Product",
+    "Order",
+    "Payment",
+    "Entitlement",
+    "WebhookLog",
 ]

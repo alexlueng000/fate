@@ -189,6 +189,34 @@ class QuotaService:
         return quota
 
     @staticmethod
+    def add_quota(
+        db: Session,
+        user_id: int,
+        amount: int,
+        quota_type: str = "chat",
+        source: str = "purchase"
+    ) -> UserQuota:
+        """
+        增加用户配额（购买后发放）
+        - 如果是无限制（-1），则设置为具体数值
+        - 否则累加到现有配额
+        """
+        quota = QuotaService.get_or_create_quota(db, user_id, quota_type)
+
+        if quota.total_quota == -1:
+            # 从无限制变为有限制
+            quota.total_quota = amount
+            quota.used_quota = 0
+        else:
+            # 累加配额
+            quota.total_quota += amount
+
+        quota.source = source
+        db.commit()
+        db.refresh(quota)
+        return quota
+
+    @staticmethod
     def log_usage(
         db: Session,
         user_id: int,

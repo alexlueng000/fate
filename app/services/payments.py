@@ -7,7 +7,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-# from app.models import Order, Payment
+from app.models import Order, Payment
 
 
 # ---------- 读取 ----------
@@ -25,32 +25,42 @@ def get_latest_payment_for_order(db: Session, order_id: int) -> Optional[Payment
     return db.execute(stmt).scalars().first()
 
 
-# ---------- 预支付（开发态占位） ----------
+# ---------- 预支付 ----------
 def create_prepay(
     db: Session,
     *,
     order: Order,
-    channel: str,  # "WECHAT_JSAPI" / "WECHAT_NATIVE"
+    channel: str,  # WECHAT_JSAPI / WECHAT_NATIVE / ALIPAY_PC / ALIPAY_H5
 ) -> Payment:
     """
-    创建一条预支付记录（PENDING）。
-    - 仅允许对 status=CREATED 的订单创建预支付
-    - 开发态：生成一个占位 prepay_id，真实对接时替换为微信返回值
-    不在此函数内 commit；调用方用 get_db_tx() 提交。
+    创建预支付记录（PENDING）。
+    - 开发态：生成占位 prepay_id；支付宝渠道额外填充 pay_url
+    - 不在此函数内 commit；调用方用 get_db_tx() 提交
     """
     if order.status != "CREATED":
         raise ValueError("Order is not in CREATED status")
 
-    prepay_id = f"dev_prepay_{order.out_trade_no}"
+    prepay_id: Optional[str] = None
+    pay_url: Optional[str] = None
+
+    if channel in ("ALIPAY_PC", "ALIPAY_H5"):
+        # 开发态：生成占位跳转 URL（生产环境替换为支付宝 SDK 返回的表单 URL）
+        prepay_id = f"dev_alipay_{order.out_trade_no}"
+        pay_url = f"https://openapi.alipaydev.com/gateway.do?dev_order={order.out_trade_no}"
+    else:
+        # WeChat（WECHAT_JSAPI / WECHAT_NATIVE）
+        prepay_id = f"dev_prepay_{order.out_trade_no}"
+
     pay = Payment(
         order_id=order.id,
         channel=channel,
         prepay_id=prepay_id,
+        pay_url=pay_url,
         status="PENDING",
         raw=None,
     )
     db.add(pay)
-    db.flush()  # 分配 id
+    db.flush()
     return pay
 
 
@@ -63,15 +73,13 @@ def mark_success(
     raw: Optional[str] = None,
 ) -> Payment:
     """
-    支付成功落账：
-    - 将最新一条 Payment 标记为 SUCCESS，写入 transaction_id/raw
+    支付成功落账（幂等）：
+    - 将最新 Payment 标记为 SUCCESS，写入 transaction_id/raw
     - 将订单状态置为 PAID（若当前仍为 CREATED）
-    - 幂等：若订单已是 PAID，则直接返回最新 Payment
     """
     latest = get_latest_payment_for_order(db, order.id)
     if not latest:
-        # 没有预支付记录也允许直接落账（兜底）
-        latest = Payment(order_id=order.id, channel="WECHAT_JSAPI", status="PENDING")
+        latest = Payment(order_id=order.id, channel="UNKNOWN", status="PENDING")
         db.add(latest)
         db.flush()
 
@@ -91,14 +99,9 @@ def mark_fail(
     order: Order,
     raw: Optional[str] = None,
 ) -> Payment:
-    """
-    支付失败落账：
-    - 将最新一条 Payment 标记为 FAIL，记录 raw
-    - 不修改订单状态（仍为 CREATED，可重试）
-    """
     latest = get_latest_payment_for_order(db, order.id)
     if not latest:
-        latest = Payment(order_id=order.id, channel="WECHAT_JSAPI", status="PENDING")
+        latest = Payment(order_id=order.id, channel="UNKNOWN", status="PENDING")
         db.add(latest)
         db.flush()
 

@@ -7,13 +7,13 @@ from typing import Optional
 from sqlalchemy import (
     ForeignKey,
     Index,
-    BigInteger,
     Integer,
     String,
     DateTime,
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.mysql import BIGINT as UBIGINT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -35,7 +35,7 @@ class UserQuota(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UBIGINT(unsigned=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,

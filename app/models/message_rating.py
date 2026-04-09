@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     func,
 )
+from sqlalchemy.dialects.mysql import BIGINT as UBIGINT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.mysql import JSON
 
@@ -38,7 +39,7 @@ class MessageRating(Base):
     )
 
     user_id: Mapped[Optional[int]] = mapped_column(
-        Integer,
+        UBIGINT(unsigned=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         index=True,
         nullable=True,
