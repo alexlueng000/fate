@@ -120,7 +120,6 @@ def start_chat(
         with utils.timer("pre_build_prompt", spans):
             composed = utils.build_full_system_prompt(
                 base_prompt,
-                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"]},
                 kb_passages
             )
 
@@ -149,6 +148,11 @@ def start_chat(
             })
 
         opening_user_msg = (
+            f"我的命盘信息如下：\n"
+            f"公历出生日期（真太阳时）：{paipan.get('solar_date', '')}\n"
+            f"性别：{paipan['gender']}\n"
+            f"八字：\n{utils.format_four_pillars(paipan['four_pillars'])}\n"
+            f"大运：\n{utils.format_dayun(paipan['dayun'])}\n\n"
             "请基于以上命盘做一份通用且全面的解读，条理清晰，"
             "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
             "结尾需要另起一行提醒：以上内容由传统文化AI生成，仅供娱乐参考。"

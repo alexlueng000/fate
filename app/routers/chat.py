@@ -199,7 +199,6 @@ async def websocket_chat(websocket: WebSocket):
             base_prompt = load_system_prompt_from_db()
             composed = build_full_system_prompt(
                 base_prompt,
-                {"four_pillars": paipan["four_pillars"], "dayun": paipan["dayun"], "gender": paipan["gender"], "solar_date": paipan.get("solar_date")},
                 kb_passages
             )
 
@@ -212,6 +211,17 @@ async def websocket_chat(websocket: WebSocket):
             })
 
             opening_user_msg = (
+                f"我的命盘信息如下：\n"
+                f"公历出生日期（真太阳时）：{paipan.get('solar_date', '')}\n"
+                f"性别：{paipan['gender']}\n"
+                f"八字：\n四柱：\n年柱: {''.join(paipan['four_pillars']['year'])}\n"
+                f"月柱: {''.join(paipan['four_pillars']['month'])}\n"
+                f"日柱: {''.join(paipan['four_pillars']['day'])}\n"
+                f"时柱: {''.join(paipan['four_pillars']['hour'])}\n"
+                f"大运：\n" + "\n".join(
+                    f"- 起始年龄 {item['age']}，起运年 {item['start_year']}，大运 {''.join(item['pillar'])}"
+                    for item in paipan['dayun']
+                ) + "\n\n"
                 "请基于以上命盘做一份通用且全面的解读，条理清晰，"
                 "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
                 "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
