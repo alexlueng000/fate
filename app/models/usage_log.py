@@ -5,7 +5,6 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import (
-    BigInteger,
     ForeignKey,
     Index,
     Integer,
@@ -13,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     func,
 )
+from sqlalchemy.dialects.mysql import BIGINT as UBIGINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -26,14 +26,14 @@ class UsageLog(Base):
     __tablename__ = "usage_logs"
 
     id: Mapped[int] = mapped_column(
-        BigInteger,
+        UBIGINT(unsigned=True),
         primary_key=True,
         autoincrement=True,
         nullable=False,
     )
 
     user_id: Mapped[int] = mapped_column(
-        BigInteger,
+        UBIGINT(unsigned=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,

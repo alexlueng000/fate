@@ -14,6 +14,7 @@ from sqlalchemy import (
     text,
     func,
 )
+from sqlalchemy.dialects.mysql import BIGINT as UBIGINT
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -93,7 +94,7 @@ class InvitationCode(Base):
 
     # 创建者（管理员用户ID）
     created_by: Mapped[Optional[int]] = mapped_column(
-        Integer,
+        UBIGINT(unsigned=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
         comment="创建者用户ID"
@@ -169,7 +170,7 @@ class InvitationCodeUsage(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        Integer,
+        UBIGINT(unsigned=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         comment="使用者用户ID"

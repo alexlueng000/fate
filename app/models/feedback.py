@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Integer, String, Text, DateTime, ForeignKey, Index, func
+from sqlalchemy.dialects.mysql import BIGINT as UBIGINT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -23,7 +24,7 @@ class Feedback(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, comment="主键ID")
     user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, comment="用户ID"
+        UBIGINT(unsigned=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, comment="用户ID"
     )
     type: Mapped[str] = mapped_column(
         String(20), nullable=False, default="other", comment="反馈类型: bug/feature/question/other"
@@ -42,7 +43,7 @@ class Feedback(Base):
         DateTime, nullable=True, comment="回复时间"
     )
     replied_by: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, comment="回复管理员ID"
+        UBIGINT(unsigned=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, comment="回复管理员ID"
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), comment="创建时间"
