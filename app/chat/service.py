@@ -197,7 +197,9 @@ def start_chat(
                 yield sse_pack("[DONE]")
 
             except Exception as e:
-                yield sse_pack(f"[ERROR]{str(e)}")
+                logger.error("start_chat_stream_error", error=str(e))
+                yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
+                yield sse_pack("[DONE]")
 
             finally:
                 if "first_byte" in spans:
@@ -359,7 +361,9 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
             except Exception as e:
-                yield sse_pack(f"[ERROR]{str(e)}")
+                logger.error("send_chat_stream_error", error=str(e))
+                yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
+                yield sse_pack("[DONE]")
             finally:
                 append_history(conversation_id, "user", message)
                 append_history(conversation_id, "assistant", final)
@@ -527,7 +531,9 @@ def simplify_message(message_content: str, request: Request):
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
             except Exception as e:
-                yield sse_pack(f"[ERROR]{str(e)}")
+                logger.error("simplify_stream_error", error=str(e))
+                yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
+                yield sse_pack("[DONE]")
 
         return sse_response(gen)
 
