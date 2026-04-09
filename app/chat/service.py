@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from .markdown_utils import normalize_markdown
 from .rag import retrieve_kb
-from .deepseek_client import call_deepseek, call_deepseek_stream
+from .deepseek_client import call_deepseek, call_deepseek_stream, set_caller
 from .sse import should_stream, sse_pack, sse_response
 from .store import get_conv, set_conv, append_history, clear_history
 from . import utils
@@ -178,6 +178,7 @@ def start_chat(
                 yield sse_pack(json.dumps({"meta": {"conversation_id": cid}}, ensure_ascii=False))
 
                 start_fb = time.perf_counter()
+                set_caller("chat_start")
                 for delta in call_deepseek_stream(messages):
                     if not first_byte_seen:
                         spans["first_byte"] = time.perf_counter() - start_fb
@@ -242,6 +243,7 @@ def start_chat(
 
     # —— 一次性 —— #
     with utils.timer("first_byte", spans):   # 上游整体请求（DeepSeek）算作 first_byte
+        set_caller("chat_start")
         reply_raw = call_deepseek(messages)
 
     with utils.timer("post", spans):
@@ -352,6 +354,7 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
             assistant_msg_id: Optional[int] = None  # 保存assistant消息ID
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": conversation_id}}, ensure_ascii=False))
+                set_caller("chat_send")
                 for delta in call_deepseek_stream(messages):
                     if not delta:
                         continue
@@ -390,6 +393,7 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
         return sse_response(gen)
 
     # 一次性
+    set_caller("chat_send")
     reply = normalize_markdown(call_deepseek(messages)).strip()
     reply = utils.scrub_br_block(reply)
     reply = utils.collapse_double_newlines(reply)
@@ -481,6 +485,7 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     messages = [{"role": "system", "content": composed}]
     messages.extend(trimmed_history)
 
+    set_caller("regenerate")
     reply = normalize_markdown(call_deepseek(messages))
     # Apply sensitive word filtering
     try:
@@ -524,6 +529,7 @@ def simplify_message(message_content: str, request: Request):
     if should_stream(request):
         def gen() -> Iterator[bytes]:
             try:
+                set_caller("simplify")
                 normalizer = utils.IncrementalNormalizer(normalize_interval=50)
                 for delta in call_deepseek_stream(messages, model="deepseek-chat"):
                     if not delta:
@@ -541,6 +547,7 @@ def simplify_message(message_content: str, request: Request):
 
         return sse_response(gen)
 
+    set_caller("simplify")
     reply = normalize_markdown(call_deepseek(messages, model="deepseek-chat")).strip()
     reply = utils.scrub_br_block(reply)
     reply = utils.collapse_double_newlines(reply)

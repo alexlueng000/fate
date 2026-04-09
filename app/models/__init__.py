@@ -11,6 +11,7 @@ from .order import Order
 from .payment import Payment
 from .entitlement import Entitlement
 from .webhook_log import WebhookLog
+from .api_call_log import ApiCallLog
 
 
 __all__ = [
@@ -29,4 +30,5 @@ __all__ = [
     "Payment",
     "Entitlement",
     "WebhookLog",
+    "ApiCallLog",
 ]

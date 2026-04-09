@@ -2,6 +2,7 @@
 import os
 import json
 import time
+import threading
 import requests
 from typing import Dict, List, Iterator, Any, Optional
 from dotenv import load_dotenv
@@ -16,22 +17,100 @@ DEEPSEEK_MODEL   = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 _RETRY_TIMES = 3
 _RETRY_DELAY = 2  # 秒
 
+# ---- 调用方标识（上层通过 _caller 线程变量传入） ----
+_caller_var = threading.local()
+
+
+def set_caller(name: str):
+    """由上层在调用前设置，用于标记调用来源"""
+    _caller_var.name = name
+
+
+def _get_caller() -> str:
+    return getattr(_caller_var, "name", "unknown")
+
+
+def _log_api_call(
+    model: str,
+    stream: bool,
+    prompt_tokens: int,
+    completion_tokens: int,
+    latency: float,
+    success: bool,
+    attempt: int,
+    error: Optional[str] = None,
+):
+    """异步写入 api_call_logs 表，不阻塞主流程"""
+    caller = _get_caller()
+
+    def _write():
+        try:
+            from app.db import SessionLocal
+            from app.models.api_call_log import ApiCallLog
+            db = SessionLocal()
+            try:
+                log = ApiCallLog(
+                    model=model,
+                    caller=caller,
+                    stream=stream,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    latency=round(latency, 3),
+                    success=success,
+                    attempt=attempt,
+                    error=error[:500] if error else None,
+                )
+                db.add(log)
+                db.commit()
+            finally:
+                db.close()
+        except Exception:
+            pass  # 日志写入失败不影响主流程
+
+    threading.Thread(target=_write, daemon=True).start()
+
 
 def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    use_model = model or DEEPSEEK_MODEL
     payload = {
-        "model": model or DEEPSEEK_MODEL,
+        "model": use_model,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 8192
     }
     last_exc: Exception = RuntimeError("未知错误")
     for attempt in range(_RETRY_TIMES):
+        t0 = time.perf_counter()
         try:
             r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=300)
             r.raise_for_status()
-            return r.json()["choices"][0]["message"]["content"]
+            data = r.json()
+            latency = time.perf_counter() - t0
+            # 提取 token 用量
+            usage = data.get("usage", {})
+            _log_api_call(
+                model=use_model,
+                stream=False,
+                prompt_tokens=usage.get("prompt_tokens", 0),
+                completion_tokens=usage.get("completion_tokens", 0),
+                latency=latency,
+                success=True,
+                attempt=attempt,
+            )
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
+            latency = time.perf_counter() - t0
+            _log_api_call(
+                model=use_model,
+                stream=False,
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency=latency,
+                success=False,
+                attempt=attempt,
+                error=str(e),
+            )
             last_exc = e
             if attempt < _RETRY_TIMES - 1:
                 time.sleep(_RETRY_DELAY)
@@ -44,8 +123,9 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
     网络抖动时最多重试 _RETRY_TIMES 次。
     """
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+    use_model = model or DEEPSEEK_MODEL
     payload = {
-        "model": model or DEEPSEEK_MODEL,
+        "model": use_model,
         "messages": messages,
         "temperature": 0.7,
         "max_tokens": 8192,
@@ -53,9 +133,11 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
     }
     last_exc: Exception = RuntimeError("未知错误")
     for attempt in range(_RETRY_TIMES):
+        t0 = time.perf_counter()
         try:
             with requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, stream=True, timeout=300) as r:
                 r.raise_for_status()
+                total_completion_tokens = 0
                 for raw_line in r.iter_lines(decode_unicode=True):
                     if not raw_line:
                         continue
@@ -67,13 +149,38 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         continue
                     try:
                         obj = json.loads(data)
+                        # 流式最后一个 chunk 可能包含 usage
+                        if "usage" in obj:
+                            usage = obj["usage"]
+                            total_completion_tokens = usage.get("completion_tokens", 0)
                         delta = obj.get("choices", [{}])[0].get("delta", {})
                         if "content" in delta and delta["content"]:
                             yield delta["content"]
                     except Exception:
                         yield data
+            latency = time.perf_counter() - t0
+            _log_api_call(
+                model=use_model,
+                stream=True,
+                prompt_tokens=0,
+                completion_tokens=total_completion_tokens,
+                latency=latency,
+                success=True,
+                attempt=attempt,
+            )
             return  # 成功结束，不再重试
         except Exception as e:
+            latency = time.perf_counter() - t0
+            _log_api_call(
+                model=use_model,
+                stream=True,
+                prompt_tokens=0,
+                completion_tokens=0,
+                latency=latency,
+                success=False,
+                attempt=attempt,
+                error=str(e),
+            )
             last_exc = e
             if attempt < _RETRY_TIMES - 1:
                 time.sleep(_RETRY_DELAY)

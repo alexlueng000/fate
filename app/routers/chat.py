@@ -165,7 +165,7 @@ async def websocket_chat(websocket: WebSocket):
             # 开始新对话
             from app.chat.service import start_chat
             from app.chat.utils import IncrementalNormalizer
-            from app.chat.deepseek_client import call_deepseek_stream
+            from app.chat.deepseek_client import call_deepseek_stream, set_caller
             from app.chat.sse import should_stream
             from app.chat import utils
             import uuid
@@ -233,6 +233,7 @@ async def websocket_chat(websocket: WebSocket):
             ]
 
             # 流式发送
+            set_caller("ws_start")
             normalizer = IncrementalNormalizer(normalize_interval=50)
             final_text = ""
 
@@ -267,7 +268,7 @@ async def websocket_chat(websocket: WebSocket):
             # 继续对话
             from app.chat.service import send_chat
             from app.chat.utils import IncrementalNormalizer
-            from app.chat.deepseek_client import call_deepseek_stream
+            from app.chat.deepseek_client import call_deepseek_stream, set_caller
             from app.chat.store import get_conv, append_history
             from app.chat.markdown_utils import normalize_markdown
             from app.chat import utils as chat_utils
@@ -303,6 +304,7 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"meta": {"conversation_id": conversation_id}})
 
             # 流式发送
+            set_caller("ws_send")
             normalizer = IncrementalNormalizer(normalize_interval=50)
             final_text = ""
 
