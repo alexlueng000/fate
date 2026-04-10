@@ -295,7 +295,7 @@ async def websocket_chat(websocket: WebSocket):
                 kb_block = "\n\n".join(kb_passages)
                 composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
 
-            recentN = 10
+            recentN = 6  # 减少历史消息数量以节省 token
             messages = [{"role": "system", "content": composed}]
             messages.extend(conv["history"][-recentN:])
             messages.append({"role": "user", "content": message})

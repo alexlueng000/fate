@@ -39,6 +39,8 @@ def _log_api_call(
     success: bool,
     attempt: int,
     error: Optional[str] = None,
+    prompt_cache_hit_tokens: int = 0,
+    prompt_cache_miss_tokens: int = 0,
 ):
     """异步写入 api_call_logs 表，不阻塞主流程"""
     caller = _get_caller()
@@ -55,6 +57,8 @@ def _log_api_call(
                     stream=stream,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+                    prompt_cache_miss_tokens=prompt_cache_miss_tokens,
                     latency=round(latency, 3),
                     success=success,
                     attempt=attempt,
@@ -94,6 +98,8 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                 stream=False,
                 prompt_tokens=usage.get("prompt_tokens", 0),
                 completion_tokens=usage.get("completion_tokens", 0),
+                prompt_cache_hit_tokens=usage.get("prompt_cache_hit_tokens", 0),
+                prompt_cache_miss_tokens=usage.get("prompt_cache_miss_tokens", 0),
                 latency=latency,
                 success=True,
                 attempt=attempt,
@@ -138,6 +144,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
             with requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, stream=True, timeout=300) as r:
                 r.raise_for_status()
                 total_completion_tokens = 0
+                total_cache_hit_tokens = 0
+                total_cache_miss_tokens = 0
                 for raw_line in r.iter_lines(decode_unicode=True):
                     if not raw_line:
                         continue
@@ -153,6 +161,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         if "usage" in obj:
                             usage = obj["usage"]
                             total_completion_tokens = usage.get("completion_tokens", 0)
+                            total_cache_hit_tokens = usage.get("prompt_cache_hit_tokens", 0)
+                            total_cache_miss_tokens = usage.get("prompt_cache_miss_tokens", 0)
                         delta = obj.get("choices", [{}])[0].get("delta", {})
                         if "content" in delta and delta["content"]:
                             yield delta["content"]
@@ -164,6 +174,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                 stream=True,
                 prompt_tokens=0,
                 completion_tokens=total_completion_tokens,
+                prompt_cache_hit_tokens=total_cache_hit_tokens,
+                prompt_cache_miss_tokens=total_cache_miss_tokens,
                 latency=latency,
                 success=True,
                 attempt=attempt,
