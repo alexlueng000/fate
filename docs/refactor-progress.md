@@ -2,7 +2,7 @@
 
 **分支**: `feature/user-profile-system`  
 **开始日期**: 2026-04-16  
-**当前状态**: 阶段 1 完成 80%
+**当前状态**: 阶段 1 完成 100% ✅
 
 ---
 
@@ -79,6 +79,39 @@ app/routers/profile.py
 main.py (修改)
 docs/profile-api-testing.md
 ```
+
+---
+
+### ✅ 聊天 API 集成（100%）
+
+**提交**: `e0c9b13` - "feat: integrate profile system with chat API"
+
+1. **聊天 API 修改**
+   - ✅ `/api/chat/start` 要求已登录用户必须有档案
+   - ✅ 从用户档案读取命盘数据（不再临时计算）
+   - ✅ 自动绑定 `profile_id` 到新会话
+   - ✅ 未登录用户仍可使用临时命盘（兼容）
+
+2. **用户信息 API 增强**
+   - ✅ `/api/auth/me` 返回 `has_profile` 字段
+   - ✅ `/api/auth/me` 返回 `profile_brief` 对象
+   - ✅ 前端可据此判断是否需要引导建档
+
+3. **Service 层修改**
+   - ✅ `start_chat()` 新增 `profile_id` 参数
+   - ✅ `_create_db_conversation()` 支持绑定 `profile_id`
+   - ✅ 日志记录 `profile_id` 便于追踪
+
+**文件清单**：
+```
+app/chat/service.py (修改)
+app/routers/chat.py (修改)
+app/routers/users.py (修改)
+```
+
+**破坏性变更**：
+- 已登录用户调用 `/api/chat/start` 时，如果没有档案会返回 400 错误："请先完善个人档案"
+- 前端需要先调用 `/api/auth/me` 检查 `has_profile`，无档案时引导用户建档
 
 ---
 
@@ -282,18 +315,105 @@ def start_chat(user_id, ...):
 
 ## 总结
 
-**当前进度**：阶段 1 完成 80%（数据库 + API 层已完成）
+**当前进度**：阶段 1 完成 100% ✅（数据库 + API 层 + 聊天集成）
+
+**已完成提交**：
+1. `0f2c3c8` - 数据库模型和迁移脚本
+2. `fe2bd0b` - Profile API 端点实现
+3. `cf49feb` - API 测试文档和进度报告
+4. `e0c9b13` - 聊天 API 集成
 
 **剩余工作**：
-- 后端：0.5-1 天（修改聊天 API）
 - 前端：5.5 天（6 个页面 + 状态机）
 - 测试：1 天（联调 + 修复）
 
-**预计完成时间**：7-8 天（单人全职）
+**预计完成时间**：6.5 天（单人全职）
 
 **关键里程碑**：
 - ✅ 数据库设计完成
 - ✅ API 端点实现完成
-- 🔄 聊天 API 集成（进行中）
+- ✅ 聊天 API 集成完成
 - ⏳ 前端开发（待开始）
 - ⏳ 联调测试（待开始）
+
+---
+
+## 后端 API 完整清单
+
+### Profile API（新增）
+- `GET /api/profile/me` - 获取当前用户档案
+- `GET /api/profile/me/brief` - 获取档案简要信息
+- `POST /api/profile/create` - 创建档案
+- `PUT /api/profile/update` - 更新档案
+- `DELETE /api/profile/delete` - 删除档案
+
+### Auth API（修改）
+- `GET /api/auth/me` - 返回用户信息（新增 `has_profile` 和 `profile_brief`）
+
+### Chat API（修改）
+- `POST /api/chat/start` - 开始会话（已登录用户必须有档案，自动绑定 `profile_id`）
+
+---
+
+## 测试建议
+
+### 1. 数据库迁移测试
+
+```bash
+# 备份数据库
+mysqldump -u root -p fate > backup_$(date +%Y%m%d).sql
+
+# 执行迁移
+mysql -u root -p fate < migrations/001_add_user_profiles.sql
+
+# 验证表结构
+mysql -u root -p fate -e "DESCRIBE user_profiles;"
+mysql -u root -p fate -e "SHOW CREATE TABLE conversations;"
+```
+
+### 2. API 端到端测试
+
+```bash
+# 1. 登录获取 token
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/web/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@example.com","password":"password"}' \
+  | jq -r '.access_token')
+
+# 2. 检查用户信息（应该 has_profile=false）
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/auth/me | jq
+
+# 3. 创建档案
+curl -X POST http://localhost:8000/api/profile/create \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "gender": "male",
+    "calendar_type": "solar",
+    "birth_date": "1993-03-09",
+    "birth_time": "07:30:00",
+    "birth_location": "深圳"
+  }' | jq
+
+# 4. 再次检查用户信息（应该 has_profile=true）
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/api/auth/me | jq
+
+# 5. 开始聊天（应该成功，使用档案中的命盘）
+curl -X POST http://localhost:8000/api/chat/start \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "paipan": {},
+    "kb_index_dir": null,
+    "kb_topk": 3
+  }' | jq
+```
+
+### 3. 回滚测试
+
+```bash
+# 如果需要回滚
+mysql -u root -p fate < migrations/001_rollback_user_profiles.sql
+```
