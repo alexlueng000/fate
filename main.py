@@ -15,7 +15,7 @@ logger = setup_logging(log_level="INFO")
 from app.routers import (
     chat, bazi, users, chat_basic, admin, config_public, kb,
     invitation_codes, sensitive_words, feedback, admin_stats, user_stats,
-    message_rating, quota, products, orders, payments, webhooks,
+    message_rating, quota, products, orders, payments, webhooks, profile,
 )
 
 
@@ -49,6 +49,7 @@ def create_app() -> FastAPI:
 
     # 新增/本阶段完成的业务
     app.include_router(users.router, prefix="/api", tags=["auth"])  # /api/auth/login, /api/auth/me
+    app.include_router(profile.router, tags=["profile"])  # /api/profile/*
     app.include_router(chat_basic.router, prefix="/api", tags=["chat_basic"])
     app.include_router(admin.router, prefix="/api", tags=["admin"])
     app.include_router(config_public.router, prefix="/api", tags=["config_public"])
