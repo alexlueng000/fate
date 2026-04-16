@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -21,6 +21,9 @@ from app.db import Base  # 按你的项目路径调整
 # from .order import Order
 # from .entitlement import Entitlement
 # from .user_identity import UserIdentity  # 如果你已经有该表，可解开注释
+
+if TYPE_CHECKING:
+    from .profile import UserProfile
 
 
 class User(Base):
@@ -158,6 +161,15 @@ class User(Base):
     )
 
     # === 关联关系（便于反查） ===
+    # 用户命盘档案（一对一关系）
+    profile: Mapped[Optional["UserProfile"]] = relationship(
+        back_populates="user",
+        cascade="all,delete-orphan",
+        passive_deletes=True,
+        uselist=False,  # 一对一关系
+        doc="用户的命盘档案（方案一：一个用户一个档案）"
+    )
+
     # orders: Mapped[List["Order"]] = relationship(
     #     back_populates="user",
     #     cascade="all,delete-orphan",

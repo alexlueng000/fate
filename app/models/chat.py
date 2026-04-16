@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import TYPE_CHECKING, List, Literal, Optional
 
 from sqlalchemy import (
     Enum,
@@ -18,6 +18,9 @@ from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base  # 你的 declarative_base()
+
+if TYPE_CHECKING:
+    from .profile import UserProfile
 
 
 MessageRole = Literal["user", "assistant", "system"]
@@ -39,6 +42,14 @@ class Conversation(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
+    )
+
+    profile_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("user_profiles.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+        comment="关联的命盘档案ID（外键 user_profiles.id）"
     )
 
     title: Mapped[str] = mapped_column(
@@ -66,6 +77,10 @@ class Conversation(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="Message.id.asc()",
+    )
+
+    profile: Mapped[Optional["UserProfile"]] = relationship(
+        passive_deletes=True,
     )
 
     __table_args__ = (

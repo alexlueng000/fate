@@ -1,4 +1,5 @@
 from .user import User
+from .profile import UserProfile
 from .chat import Message, Conversation
 from .invitation_code import InvitationCode, InvitationCodeUsage
 from .sensitive_word import SensitiveWord
@@ -16,6 +17,7 @@ from .api_call_log import ApiCallLog
 
 __all__ = [
     "User",
+    "UserProfile",
     "Conversation",
     "Message",
     "InvitationCode",
