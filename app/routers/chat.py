@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..db import get_db, get_db_tx
 from ..deps import get_current_user_optional
 from ..models import User
+from ..models.profile import UserProfile
 from ..services.quota import QuotaService
 from app.schemas.chat import (
     ChatStartReq, ChatStartResp,
@@ -31,24 +32,39 @@ def chat_start(
     开始会话：支持 SSE（根据 Accept 或 ?stream=1）
     - 已登录用户会检查配额并记录使用
     - 未登录用户暂时允许使用（内测阶段）
+    - 已登录用户必须先建档，从档案读取命盘数据
     """
-    logger.info("chat_start_request", paipan=req.paipan.model_dump(), user_id=current_user.id if current_user else None)
-
-    # 配额检查（仅对已登录用户）
     user_id = current_user.id if current_user else None
+    profile_id = None
+    paipan_data = req.paipan.model_dump()
+
+    # 已登录用户：从档案读取命盘
     if user_id:
+        profile = db.query(UserProfile).filter_by(user_id=user_id).first()
+        if not profile:
+            raise HTTPException(status_code=400, detail="请先完善个人档案")
+
+        profile_id = profile.id
+        paipan_data = profile.bazi_chart
+        logger.info("chat_start_with_profile", user_id=user_id, profile_id=profile_id)
+
+        # 配额检查
         allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "chat")
         if not allowed:
             raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
         logger.info("quota_consumed", user_id=user_id, remaining=remaining)
+    else:
+        # 未登录用户：使用请求中的临时命盘
+        logger.info("chat_start_anonymous", paipan=paipan_data)
 
     result = start_chat(
-        paipan=req.paipan.model_dump(),
+        paipan=paipan_data,
         kb_index_dir=req.kb_index_dir,
         kb_topk=req.kb_topk,
         request=request,
         user_id=user_id,
         db=db,
+        profile_id=profile_id,
     )
     # 流式：直接返回 StreamingResponse
     from fastapi.responses import StreamingResponse

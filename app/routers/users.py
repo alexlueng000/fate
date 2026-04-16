@@ -66,6 +66,8 @@ class UserOut(BaseModel):
     avatar_url: str | None = None
     is_admin: bool
     default_birth_data: str | None = None  # 默认命盘数据 JSON
+    has_profile: bool = False  # 是否已建档
+    profile_brief: dict | None = None  # 档案简要信息
 
 # 登录，注册返回 
 class AuthResponse(BaseModel):
@@ -235,9 +237,28 @@ def login_compat(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> A
 # ================================== 当前用户信息 ==================================
 
 @router.get("/me", response_model=UserOut)
-def me(current_user: User = Depends(get_current_user)) -> UserOut:
-    """返回当前登录用户信息。"""
-    return current_user
+def me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> UserOut:
+    """返回当前登录用户信息（包含档案状态）。"""
+    from app.models.profile import UserProfile
+
+    # 查询用户档案
+    profile = db.query(UserProfile).filter_by(user_id=current_user.id).first()
+
+    # 构造响应
+    user_data = UserOut.model_validate(current_user)
+    user_data.has_profile = profile is not None
+
+    if profile:
+        user_data.profile_brief = {
+            "id": profile.id,
+            "gender": profile.gender,
+            "birth_date": profile.birth_date.isoformat(),
+            "birth_time": profile.birth_time.isoformat(),
+            "birth_location": profile.birth_location,
+            "display_info": profile.display_info,
+        }
+
+    return user_data
 
 
 # ================================== 邀请码验证 ==================================

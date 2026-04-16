@@ -33,10 +33,10 @@ DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 # ===================== 数据库持久化辅助函数 =====================
 
-def _create_db_conversation(db: Session, user_id: int, title: str = "八字解读") -> int:
+def _create_db_conversation(db: Session, user_id: int, title: str = "八字解读", profile_id: Optional[int] = None) -> int:
     """创建数据库对话记录，返回对话ID"""
     from app.models.chat import Conversation
-    conv = Conversation(user_id=user_id, title=title)
+    conv = Conversation(user_id=user_id, title=title, profile_id=profile_id)
     db.add(conv)
     db.commit()
     db.refresh(conv)
@@ -78,7 +78,8 @@ def start_chat(
     kb_topk: int,
     request: Request,
     user_id: Optional[int] = None,
-    db: Optional[Session] = None
+    db: Optional[Session] = None,
+    profile_id: Optional[int] = None
 ):
     """
     Start a new chat conversation with initial Bazi analysis.
@@ -90,6 +91,7 @@ def start_chat(
         request: FastAPI request object (for streaming detection)
         user_id: Optional user ID for database persistence
         db: Optional database session for persistence
+        profile_id: Optional profile ID to bind to this conversation
 
     Returns:
         StreamingResponse or (conversation_id, reply_text) tuple
@@ -129,9 +131,9 @@ def start_chat(
             logger.info("start_chat_init", user_id=user_id, db_present=db is not None)
             if user_id and db:
                 try:
-                    db_conv_id = _create_db_conversation(db, user_id, "八字解读")
+                    db_conv_id = _create_db_conversation(db, user_id, "八字解读", profile_id=profile_id)
                     cid = f"conv_{db_conv_id}"  # 使用数据库ID
-                    logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid)
+                    logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid, profile_id=profile_id)
                 except Exception as e:
                     logger.error("db_conversation_create_failed", error=str(e), user_id=user_id)
                     cid = f"conv_{uuid.uuid4().hex[:8]}"
