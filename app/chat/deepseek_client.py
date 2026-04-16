@@ -130,14 +130,19 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
         "temperature": 0.7,
         "max_tokens": 8192,
         "stream": True,
+        "stream_options": {"include_usage": True},  # 让 DeepSeek 在末尾 chunk 返回完整 usage
     }
     last_exc: Exception = RuntimeError("未知错误")
     for attempt in range(_RETRY_TIMES):
         t0 = time.perf_counter()
+        _logged = False      # 防止 finally 和 except 双重记录
+        _success = False
+        _prompt_tokens = 0
+        _completion_tokens = 0
+        _error: Optional[str] = None
         try:
             with requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, stream=True, timeout=300) as r:
                 r.raise_for_status()
-                total_completion_tokens = 0
                 for raw_line in r.iter_lines(decode_unicode=True):
                     if not raw_line:
                         continue
@@ -149,39 +154,35 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         continue
                     try:
                         obj = json.loads(data)
-                        # 流式最后一个 chunk 可能包含 usage
+                        # 流式末尾 chunk 包含完整 usage（需 stream_options.include_usage=True）
                         if "usage" in obj:
                             usage = obj["usage"]
-                            total_completion_tokens = usage.get("completion_tokens", 0)
+                            _prompt_tokens = usage.get("prompt_tokens", 0)
+                            _completion_tokens = usage.get("completion_tokens", 0)
                         delta = obj.get("choices", [{}])[0].get("delta", {})
                         if "content" in delta and delta["content"]:
                             yield delta["content"]
                     except Exception:
                         yield data
-            latency = time.perf_counter() - t0
-            _log_api_call(
-                model=use_model,
-                stream=True,
-                prompt_tokens=0,
-                completion_tokens=total_completion_tokens,
-                latency=latency,
-                success=True,
-                attempt=attempt,
-            )
+            _success = True
             return  # 成功结束，不再重试
         except Exception as e:
-            latency = time.perf_counter() - t0
-            _log_api_call(
-                model=use_model,
-                stream=True,
-                prompt_tokens=0,
-                completion_tokens=0,
-                latency=latency,
-                success=False,
-                attempt=attempt,
-                error=str(e),
-            )
+            _error = str(e)
             last_exc = e
-            if attempt < _RETRY_TIMES - 1:
-                time.sleep(_RETRY_DELAY)
+        finally:
+            # 无论正常结束、异常、还是客户端断连(GeneratorExit)都会执行
+            if not _logged:
+                _logged = True
+                _log_api_call(
+                    model=use_model,
+                    stream=True,
+                    prompt_tokens=_prompt_tokens,
+                    completion_tokens=_completion_tokens,
+                    latency=round(time.perf_counter() - t0, 3),
+                    success=_success,
+                    attempt=attempt,
+                    error=_error,
+                )
+        if attempt < _RETRY_TIMES - 1:
+            time.sleep(_RETRY_DELAY)
     raise last_exc
