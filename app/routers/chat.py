@@ -45,7 +45,9 @@ def chat_start(
             raise HTTPException(status_code=400, detail="请先完善个人档案")
 
         profile_id = profile.id
-        paipan_data = profile.bazi_chart
+        # 解包 mingpan 层（数据库中保存的格式是 {"mingpan": {...}}）
+        bazi_chart = profile.bazi_chart
+        paipan_data = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else bazi_chart
         logger.info("chat_start_with_profile", user_id=user_id, profile_id=profile_id)
 
         # 配额检查
