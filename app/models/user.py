@@ -15,6 +15,7 @@ from sqlalchemy import (
     text,
     func,
 )
+from sqlalchemy.dialects.mysql import INTEGER
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base  # 按你的项目路径调整
@@ -45,8 +46,9 @@ class User(Base):
 
     # === 主键 ===
     id: Mapped[int] = mapped_column(
-        Integer,
+        INTEGER(unsigned=True),
         primary_key=True,
+        autoincrement=True,
         comment="主键ID（自增）"
     )
 

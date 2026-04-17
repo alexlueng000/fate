@@ -16,7 +16,7 @@ from sqlalchemy import (
     Time,
     func,
 )
-from sqlalchemy.dialects.mysql import JSON
+from sqlalchemy.dialects.mysql import INTEGER, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -43,7 +43,7 @@ class UserProfile(Base):
 
     # === 主键 ===
     id: Mapped[int] = mapped_column(
-        Integer,
+        INTEGER(unsigned=True),
         primary_key=True,
         autoincrement=True,
         comment="主键ID"
@@ -51,7 +51,7 @@ class UserProfile(Base):
 
     # === 关联用户（唯一约束：一个用户一个档案） ===
     user_id: Mapped[int] = mapped_column(
-        Integer,
+        INTEGER(unsigned=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         unique=True,  # 保证一个用户只有一个档案
         nullable=False,
