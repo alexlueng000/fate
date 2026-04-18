@@ -162,8 +162,12 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         delta = obj.get("choices", [{}])[0].get("delta", {})
                         if "content" in delta and delta["content"]:
                             yield delta["content"]
-                    except Exception:
-                        yield data
+                    except Exception as parse_err:
+                        # Log parsing errors but don't yield raw data
+                        from app.core.logging import get_logger
+                        logger = get_logger("deepseek_client")
+                        logger.warning(f"Failed to parse SSE chunk: {parse_err}, data: {data[:200]}")
+                        continue
             _success = True
             return  # 成功结束，不再重试
         except Exception as e:
