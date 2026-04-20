@@ -116,7 +116,7 @@ def start_chat(
 
         # 2）读 DB 配置耗时
         with utils.timer("pre_db", spans):
-            base_prompt = utils.load_system_prompt_from_db()
+            base_prompt = utils.load_report_system_prompt_from_db()
 
         # 3）拼 system prompt 耗时
         with utils.timer("pre_build_prompt", spans):

@@ -202,7 +202,35 @@ def load_system_prompt_from_db(ttl: int = _PROMPT_CACHE_TTL) -> str:
         return content
 
 
-def clear_prompt_cache() -> None:
+def load_report_system_prompt_from_db(ttl: int = _PROMPT_CACHE_TTL) -> str:
+    """
+    从数据库加载报告页专用提示词（带缓存）。
+
+    读取 report_system_prompt；不存在则回退至通用 system_prompt。
+    """
+    cache_key = "report_system_prompt"
+    now = time.time()
+
+    with _prompt_cache_lock:
+        if cache_key in _prompt_cache:
+            content, expiry = _prompt_cache[cache_key]
+            if now < expiry:
+                return content
+
+    with db_session() as db:
+        cfg = fetch_latest_config(db, "report_system_prompt")
+        if not cfg:
+            # fallback to general system_prompt
+            return load_system_prompt_from_db(ttl)
+        content = (cfg["value_json"] or {}).get("content") or ""
+
+        with _prompt_cache_lock:
+            _prompt_cache[cache_key] = (content, now + ttl)
+
+        return content
+
+
+
     """Clear the system prompt cache."""
     with _prompt_cache_lock:
         _prompt_cache.clear()
