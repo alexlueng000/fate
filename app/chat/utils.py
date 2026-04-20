@@ -307,20 +307,21 @@ class IncrementalNormalizer:
         if self._apply_content_filter:
             try:
                 from .content_filter import apply_content_filters
+                pre_filter = normalized
                 with db_session() as db:
-                    normalized = apply_content_filters(normalized, db)
-                # 修复敏感词过滤后可能被拆分的标题
-                # 检测模式：标题行后紧跟一个短行（1-5个中文字符或标点），将其合并回标题
-                import re
-                # 匹配：标题行 + 换行 + 1-5个字符的短行（不以特殊字符开头）
-                normalized = re.sub(
-                    r'^(#{1,6}\s+.+?)\n([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]{1,5})\n',
-                    r'\1\2\n',
-                    normalized,
-                    flags=re.MULTILINE
-                )
-                # 再次调用 normalize_markdown 确保格式正确
-                normalized = self._normalize_markdown(normalized)
+                    filtered = apply_content_filters(normalized, db)
+                # Safety: if filtering blanked >50% of the text, skip it
+                if filtered and len(filtered.strip()) >= len(pre_filter.strip()) * 0.5:
+                    normalized = filtered
+                    # 修复敏感词过滤后可能被拆分的标题
+                    import re
+                    normalized = re.sub(
+                        r'^(#{1,6}\s+.+?)\n([\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]{1,5})\n',
+                        r'\1\2\n',
+                        normalized,
+                        flags=re.MULTILINE
+                    )
+                    normalized = self._normalize_markdown(normalized)
             except Exception:
                 # 过滤失败不影响主流程
                 pass

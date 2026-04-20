@@ -196,6 +196,7 @@ def start_chat(
 
                 # Final normalization
                 final = normalizer.finalize()
+                logger.info("chat_start_final_text", cid=cid, raw_chunks=len(normalizer._raw_chunks), length=len(final), preview=final[:200])
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
 
                 if not first_byte_seen:
