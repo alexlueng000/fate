@@ -159,7 +159,11 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                             usage = obj["usage"]
                             _prompt_tokens = usage.get("prompt_tokens", 0)
                             _completion_tokens = usage.get("completion_tokens", 0)
-                        delta = obj.get("choices", [{}])[0].get("delta", {})
+                        choices = obj.get("choices") or []
+                        first_choice = choices[0] if choices else None
+                        if not first_choice:
+                            continue
+                        delta = first_choice.get("delta") or {}
                         if "content" in delta and delta["content"]:
                             yield delta["content"]
                     except Exception as parse_err:
