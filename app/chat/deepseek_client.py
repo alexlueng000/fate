@@ -154,9 +154,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         continue
                     try:
                         obj = json.loads(data)
-                        # 流式末尾 chunk 包含完整 usage（需 stream_options.include_usage=True）
-                        if "usage" in obj:
-                            usage = obj["usage"]
+                        usage = obj.get("usage") or {}
+                        if usage:
                             _prompt_tokens = usage.get("prompt_tokens", 0)
                             _completion_tokens = usage.get("completion_tokens", 0)
                         choices = obj.get("choices") or []
