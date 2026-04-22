@@ -9,17 +9,34 @@ from ..models import User
 from ..models.profile import UserProfile
 from ..services.quota import QuotaService
 from app.schemas.chat import (
-    ChatStartReq, ChatStartResp,
+    ChatStartReq, ChatStartResp, ChatInitResp,
     ChatSendReq, ChatSendResp,
     ChatRegenerateReq, ChatClearReq, ChatOkResp,
     ChatSimplifyReq,
 )
-from app.chat.service import start_chat, send_chat, regenerate, clear, simplify_message
+from app.chat.service import start_chat, send_chat, regenerate, clear, simplify_message, init_chat
 from app.core.logging import get_logger
 import json
 
 logger = get_logger("chat.router")
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+@router.post("/init", response_model=ChatInitResp)
+def chat_init(
+    db: Session = Depends(get_db_tx),
+    current_user: Optional[User] = Depends(get_current_user_optional)
+):
+    """
+    初始化会话（不生成 AI 开场白），仅返回 conversation_id。
+    前端展示静态开场白，用户发消息后直接调 /chat 接口。
+    """
+    user_id = current_user.id if current_user else None
+    if user_id:
+        allowed, msg, _ = QuotaService.check_and_consume(db, user_id, "chat")
+        if not allowed:
+            raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
+    cid = init_chat(user_id=user_id, db=db)
+    return ChatInitResp(conversation_id=cid)
 
 @router.post("/start", response_model=ChatStartResp)
 def chat_start(
@@ -36,7 +53,7 @@ def chat_start(
     """
     user_id = current_user.id if current_user else None
     profile_id = None
-    paipan_data = req.paipan.model_dump()
+    paipan_data = req.paipan.model_dump() if req.paipan else {}
 
     # 已登录用户：从档案读取命盘
     if user_id:

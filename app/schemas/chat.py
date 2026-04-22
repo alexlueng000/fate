@@ -56,10 +56,13 @@ class PaipanPayload(BaseModel):
     solar_date: Optional[str] = Field(None, description="公历出生日期时间（真太阳时），YYYY-MM-DD HH:MM:SS")
 
 class ChatStartReq(BaseModel):
-    paipan: PaipanPayload
+    paipan: Optional[PaipanPayload] = None
     kb_index_dir: Optional[str] = None
     kb_topk: int = 0
     note: Optional[str] = None
+
+class ChatInitResp(BaseModel):
+    conversation_id: str
 
 class ChatStartResp(BaseModel):
     conversation_id: str

@@ -296,6 +296,52 @@ def start_chat(
     return cid, reply
 
 
+def init_chat(
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None,
+    profile_id: Optional[int] = None,
+    paipan: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    初始化会话（不生成 AI 开场白），仅创建会话并返回 conversation_id。
+    已登录用户自动从档案读取命盘；也可直接传入 paipan。
+    """
+    # 读 system prompt
+    base_prompt = utils.load_report_system_prompt_from_db()
+    composed = utils.build_full_system_prompt(base_prompt, [])
+
+    # 已登录用户从档案读命盘（若未传入 paipan）
+    if user_id and db and not paipan:
+        from app.models.user import UserProfile
+        profile = db.query(UserProfile).filter_by(user_id=user_id).first()
+        if profile:
+            profile_id = profile.id
+            bazi_chart = profile.bazi_chart
+            paipan = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else {}
+
+    # 创建 DB 对话记录（已登录用户）
+    db_conv_id: Optional[int] = None
+    if user_id and db:
+        try:
+            db_conv_id = _create_db_conversation(db, user_id, "八字解读", profile_id=profile_id)
+            cid = f"conv_{db_conv_id}"
+        except Exception:
+            cid = f"conv_{uuid.uuid4().hex[:8]}"
+    else:
+        cid = f"conv_{uuid.uuid4().hex[:8]}"
+
+    set_conv(cid, {
+        "pinned": composed,
+        "history": [],
+        "kb_index_dir": os.path.abspath(DEFAULT_KB_INDEX),
+        "user_id": user_id,
+        "db_conv_id": db_conv_id,
+    })
+
+    logger.info("init_chat_created", cid=cid, user_id=user_id, profile_id=profile_id)
+    return cid
+
+
 def send_chat(conversation_id: str, message: str, request: Request, user_id: Optional[int] = None, db: Optional[Session] = None):
     """
     Send a message in an existing conversation.
