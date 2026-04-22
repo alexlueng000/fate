@@ -312,7 +312,7 @@ def init_chat(
 
     # 已登录用户从档案读命盘（若未传入 paipan）
     if user_id and db and not paipan:
-        from app.models.user import UserProfile
+        from app.models.profile import UserProfile
         profile = db.query(UserProfile).filter_by(user_id=user_id).first()
         if profile:
             profile_id = profile.id
