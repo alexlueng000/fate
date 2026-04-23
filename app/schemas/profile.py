@@ -47,6 +47,7 @@ class ProfileResponse(BaseModel):
     birth_longitude: Optional[float]
     birth_latitude: Optional[float]
     bazi_chart: Optional[dict]
+    ai_report: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -56,6 +57,11 @@ class ProfileResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ProfileReportSaveRequest(BaseModel):
+    """保存命理报告请求"""
+    ai_report: str = Field(..., description="AI 生成的命理报告正文")
 
 
 class ProfileBriefResponse(BaseModel):

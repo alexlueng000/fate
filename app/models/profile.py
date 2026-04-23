@@ -110,6 +110,13 @@ class UserProfile(Base):
         comment="八字命盘数据（包含四柱、大运等完整信息）"
     )
 
+    # === AI 报告 ===
+    ai_report: Mapped[Optional[str]] = mapped_column(
+        __import__('sqlalchemy').dialects.mysql.MEDIUMTEXT(),
+        nullable=True,
+        comment="AI 生成的命理分析报告正文（Markdown）"
+    )
+
     # === 时间戳 ===
     created_at: Mapped[datetime] = mapped_column(
         DateTime,

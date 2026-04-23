@@ -12,6 +12,7 @@ from app.models import User
 from app.schemas.profile import (
     ProfileCreateRequest,
     ProfileUpdateRequest,
+    ProfileReportSaveRequest,
     ProfileResponse,
     ProfileBriefResponse,
 )
@@ -46,6 +47,7 @@ def get_my_profile(
         birth_longitude=profile.birth_longitude,
         birth_latitude=profile.birth_latitude,
         bazi_chart=profile.bazi_chart,
+        ai_report=profile.ai_report,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
         display_info=profile.display_info,
@@ -176,6 +178,24 @@ def update_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新档案失败: {str(e)}"
         )
+
+
+@router.post("/report", response_model=dict)
+def save_profile_report(
+    data: ProfileReportSaveRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """保存命理报告"""
+    profile = ProfileService.get_user_profile(db, current_user.id)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户没有档案"
+        )
+    profile.ai_report = data.ai_report
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/delete", status_code=status.HTTP_204_NO_CONTENT)
