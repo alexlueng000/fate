@@ -5,6 +5,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_current_user
@@ -218,3 +219,18 @@ def delete_profile(
             detail="用户没有档案"
         )
     return None
+
+
+@router.get("/report")
+def get_report(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    获取用户已缓存的 AI 命理报告。
+    若还未生成过报告，返回 {"report": null}。
+    """
+    profile = ProfileService.get_user_profile(db, current_user.id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="用户没有档案")
+    return {"report": profile.ai_report or None}

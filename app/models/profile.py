@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
     Time,
     func,
 )
@@ -112,7 +113,7 @@ class UserProfile(Base):
 
     # === AI 报告 ===
     ai_report: Mapped[Optional[str]] = mapped_column(
-        __import__('sqlalchemy').dialects.mysql.MEDIUMTEXT(),
+        Text,
         nullable=True,
         comment="AI 生成的命理分析报告正文（Markdown）"
     )
