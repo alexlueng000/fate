@@ -336,6 +336,7 @@ def init_chat(
         "kb_index_dir": os.path.abspath(DEFAULT_KB_INDEX),
         "user_id": user_id,
         "db_conv_id": db_conv_id,
+        "paipan": paipan or {},
     })
 
     logger.info("init_chat_created", cid=cid, user_id=user_id, profile_id=profile_id)
@@ -387,8 +388,24 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
         composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
 
     recentN = 10
+    history = conv.get("history", [])
     messages = [{"role": "system", "content": composed}]
-    messages.extend(conv["history"][-recentN:])
+
+    # 第一条消息时，前置注入命盘数据作为上下文
+    if not history:
+        paipan = conv.get("paipan") or {}
+        if paipan and paipan.get("four_pillars") and paipan.get("dayun"):
+            paipan_context = (
+                f"我的命盘信息如下：\n"
+                f"公历出生日期（真太阳时）：{paipan.get('solar_date', '')}\n"
+                f"性别：{paipan.get('gender', '')}\n"
+                f"八字：\n{utils.format_four_pillars(paipan['four_pillars'])}\n"
+                f"大运：\n{utils.format_dayun(paipan['dayun'])}"
+            )
+            messages.append({"role": "user", "content": paipan_context})
+            messages.append({"role": "assistant", "content": "好的，我已收到您的命盘信息，请问您想了解什么？"})
+
+    messages.extend(history[-recentN:])
     messages.append({"role": "user", "content": message})
 
     logger.debug("chat_send_prompt", conversation_id=conversation_id, message=message)
