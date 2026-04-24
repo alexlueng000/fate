@@ -371,14 +371,21 @@ def get_value_actions(
 @router.patch("/value-actions/{action_id}/status")
 def update_value_action_status(
     action_id: int,
-    status: int = Field(..., ge=0, le=2),
+    status: int,
     db: Session = Depends(get_db_tx),
     current_user: User = Depends(get_current_user)
 ):
     """
     更新价值行动状态
     0=计划中, 1=进行中, 2=已完成
+
+    Args:
+        action_id: 价值行动ID
+        status: 状态值 (0-2)
     """
+    if status < 0 or status > 2:
+        raise HTTPException(status_code=400, detail="状态值必须在0-2之间")
+
     action = db.query(ValueAction).filter(
         ValueAction.id == action_id,
         ValueAction.user_id == current_user.id
