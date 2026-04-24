@@ -16,7 +16,7 @@ from app.routers import (
     chat, bazi, users, chat_basic, admin, config_public, kb,
     invitation_codes, sensitive_words, feedback, admin_stats, user_stats,
     message_rating, quota, products, orders, payments, webhooks, profile,
-    emotion,
+    emotion, liuyao,
 )
 
 
@@ -71,6 +71,9 @@ def create_app() -> FastAPI:
 
     # 心镜灯功能
     app.include_router(emotion.router, prefix="/api", tags=["emotion"])
+
+    # 六爻玄机功能
+    app.include_router(liuyao.router, prefix="/api", tags=["liuyao"])
 
 
     @app.get("/api/ping")

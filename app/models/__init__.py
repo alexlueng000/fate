@@ -14,6 +14,7 @@ from .entitlement import Entitlement
 from .webhook_log import WebhookLog
 from .api_call_log import ApiCallLog
 from .emotion import EmotionRecord, ExceptionMoment, ValueAction
+from .liuyao import LiuyaoHexagram
 
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     "EmotionRecord",
     "ExceptionMoment",
     "ValueAction",
+    "LiuyaoHexagram",
 ]
