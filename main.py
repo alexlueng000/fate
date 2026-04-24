@@ -16,6 +16,7 @@ from app.routers import (
     chat, bazi, users, chat_basic, admin, config_public, kb,
     invitation_codes, sensitive_words, feedback, admin_stats, user_stats,
     message_rating, quota, products, orders, payments, webhooks, profile,
+    emotion,
 )
 
 
@@ -67,6 +68,9 @@ def create_app() -> FastAPI:
     app.include_router(orders.router, prefix="/api", tags=["orders"])
     app.include_router(payments.router, prefix="/api", tags=["payments"])
     app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
+
+    # 心镜灯功能
+    app.include_router(emotion.router, prefix="/api", tags=["emotion"])
 
 
     @app.get("/api/ping")
