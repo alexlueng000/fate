@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import random
 import uuid
+from lunar_python import Lunar, Solar
 
 
 # 八卦基础数据
@@ -60,6 +61,48 @@ NAJIA = {
     6: ["寅", "辰", "午", "申", "戌", "子"],  # 坎
     7: ["辰", "午", "申", "戌", "子", "寅"],  # 艮
     8: ["未", "巳", "卯", "丑", "亥", "酉"],  # 坤
+}
+
+# 八宫卦序：每宫8个卦，用于判断世应爻
+BAGONG = {
+    "乾宫": [
+        (1, 1, 6),  # 乾为天 - 世在六爻
+        (1, 5, 1),  # 天风姤 - 世在初爻
+        (1, 6, 2),  # 天水讼 - 世在二爻
+        (1, 7, 3),  # 天山遁 - 世在三爻
+        (8, 7, 4),  # 地山谦（游魂）- 世在四爻
+        (6, 7, 5),  # 水山蹇（归魂）- 世在五爻
+        (1, 2, 2),  # 天泽履 - 世在二爻
+        (1, 3, 3),  # 天火同人 - 世在三爻
+    ],
+    "兑宫": [
+        (2, 2, 6), (2, 4, 1), (2, 6, 2), (2, 7, 3),
+        (8, 7, 4), (6, 7, 5), (2, 1, 2), (2, 3, 3),
+    ],
+    "离宫": [
+        (3, 3, 6), (3, 5, 1), (3, 6, 2), (3, 7, 3),
+        (8, 7, 4), (6, 7, 5), (3, 1, 2), (3, 2, 3),
+    ],
+    "震宫": [
+        (4, 4, 6), (4, 5, 1), (4, 6, 2), (4, 7, 3),
+        (8, 7, 4), (6, 7, 5), (4, 1, 2), (4, 2, 3),
+    ],
+    "巽宫": [
+        (5, 5, 6), (5, 4, 1), (5, 6, 2), (5, 7, 3),
+        (8, 7, 4), (6, 7, 5), (5, 1, 2), (5, 2, 3),
+    ],
+    "坎宫": [
+        (6, 6, 6), (6, 5, 1), (6, 4, 2), (6, 7, 3),
+        (8, 7, 4), (4, 7, 5), (6, 1, 2), (6, 3, 3),
+    ],
+    "艮宫": [
+        (7, 7, 6), (7, 5, 1), (7, 6, 2), (7, 4, 3),
+        (8, 4, 4), (6, 4, 5), (7, 1, 2), (7, 3, 3),
+    ],
+    "坤宫": [
+        (8, 8, 6), (8, 4, 1), (8, 6, 2), (8, 7, 3),
+        (1, 7, 4), (4, 7, 5), (8, 1, 2), (8, 3, 3),
+    ],
 }
 
 
@@ -218,14 +261,18 @@ class LiuyaoPaipan:
         change_shang_gua = self._lines_to_gua(change_lines[3:])
         change_gua_name = LIUSHISI_GUA.get((change_shang_gua, change_xia_gua), "未知卦")
 
-        # 世应爻（简化版本，实际需要根据卦宫判断）
+        # 世应爻和卦宫
         shi_yao, ying_yao = self._calc_shi_ying(shang_gua, xia_gua)
+        gua_gong = self._get_gua_gong(shang_gua, xia_gua)
 
         # 装纳甲
         lines_with_najia = self._zhuang_najia(lines, xia_gua, shang_gua)
 
-        # 配六兽（简化版本）
-        lines_with_liushou = self._pei_liushou(lines_with_najia)
+        # 获取干支信息
+        ganzhi = self._get_ganzhi()
+
+        # 配六兽（需要日干）
+        lines_with_liushou = self._pei_liushou(lines_with_najia, ganzhi["day"])
 
         return {
             "hexagram_id": self.hexagram_id,
@@ -238,13 +285,14 @@ class LiuyaoPaipan:
             "numbers": self.numbers,
             "main_gua": main_gua_name,
             "change_gua": change_gua_name,
+            "gua_gong": gua_gong,
             "shang_gua": BAGUA[shang_gua]["name"],
             "xia_gua": BAGUA[xia_gua]["name"],
             "dong_yao": dong_yao,
             "shi_yao": shi_yao,
             "ying_yao": ying_yao,
             "lines": lines_with_liushou,
-            "ganzhi": self._get_ganzhi(),
+            "ganzhi": ganzhi,
         }
 
     def _generate_lines(self, shang_gua: int, xia_gua: int, dong_yao: int) -> List[Dict]:
@@ -310,55 +358,104 @@ class LiuyaoPaipan:
         return change_lines
 
     def _calc_shi_ying(self, shang_gua: int, xia_gua: int) -> Tuple[int, int]:
-        """计算世应爻（简化版本）"""
-        # 实际应根据八宫卦序判断，这里简化处理
-        if shang_gua == xia_gua:
-            # 八纯卦，世在上爻
-            return (6, 3)
-        else:
-            # 简化：世在三爻，应在六爻
-            return (3, 6)
+        """计算世应爻（根据八宫卦序）"""
+        # 在八宫卦序中查找当前卦象
+        for gong_name, gua_list in BAGONG.items():
+            for shang, xia, shi in gua_list:
+                if shang == shang_gua and xia == xia_gua:
+                    # 找到了，世爻位置已知
+                    # 应爻 = (世爻 + 3) % 6，如果为0则为6
+                    ying = ((shi + 3 - 1) % 6) + 1
+                    return (shi, ying)
+
+        # 如果没找到（理论上不应该发生），使用默认值
+        return (3, 6)
 
     def _zhuang_najia(self, lines: List[Dict], xia_gua: int, shang_gua: int) -> List[Dict]:
         """装纳甲（配地支）"""
         result = []
 
-        # 下卦三爻
+        # 下卦三爻（初爻、二爻、三爻）
         xia_najia = NAJIA[xia_gua]
         for i in range(3):
             line = lines[i].copy()
             line["dizhi"] = xia_najia[i]
             result.append(line)
 
-        # 上卦三爻
+        # 上卦三爻（四爻、五爻、六爻）
         shang_najia = NAJIA[shang_gua]
         for i in range(3):
             line = lines[i + 3].copy()
-            line["dizhi"] = shang_najia[i + 3]
+            line["dizhi"] = shang_najia[i]  # 修复：应该是索引0-2，不是3-5
             result.append(line)
 
         return result
 
-    def _pei_liushou(self, lines: List[Dict]) -> List[Dict]:
-        """配六兽"""
+    def _pei_liushou(self, lines: List[Dict], day_ganzhi: str) -> List[Dict]:
+        """配六兽（根据日干）"""
+        # 提取日干
+        day_gan = day_ganzhi[0] if day_ganzhi else "甲"
+
+        # 六兽起始位置根据日干确定
+        # 甲乙日起青龙，丙丁日起朱雀，戊日起勾陈，己日起腾蛇，庚辛日起白虎，壬癸日起玄武
+        gan_to_start = {
+            "甲": 0, "乙": 0,  # 青龙
+            "丙": 1, "丁": 1,  # 朱雀
+            "戊": 2,           # 勾陈
+            "己": 3,           # 腾蛇
+            "庚": 4, "辛": 4,  # 白虎
+            "壬": 5, "癸": 5,  # 玄武
+        }
+
+        start_index = gan_to_start.get(day_gan, 0)
+
         result = []
         for i, line in enumerate(lines):
             line_copy = line.copy()
-            line_copy["liushou"] = LIUSHOU[i % 6]
+            # 从初爻开始配六兽
+            liushou_index = (start_index + i) % 6
+            line_copy["liushou"] = LIUSHOU[liushou_index]
             result.append(line_copy)
         return result
 
-    def _get_ganzhi(self) -> Dict:
-        """获取干支信息（简化版本）"""
-        year = self.timestamp.year
-        month = self.timestamp.month
-        day = self.timestamp.day
-        hour = self.timestamp.hour
+    def _get_gua_gong(self, shang_gua: int, xia_gua: int) -> str:
+        """判断卦宫"""
+        for gong_name, gua_list in BAGONG.items():
+            for shang, xia, shi in gua_list:
+                if shang == shang_gua and xia == xia_gua:
+                    return gong_name
+        return "未知宫"
 
-        # 简化处理，实际需要农历转换
-        return {
-            "year": f"{TIANGAN[year % 10]}{DIZHI[year % 12]}",
-            "month": f"{TIANGAN[month % 10]}{DIZHI[month % 12]}",
-            "day": f"{TIANGAN[day % 10]}{DIZHI[day % 12]}",
-            "hour": f"{TIANGAN[hour % 10]}{DIZHI[(hour // 2) % 12]}",
-        }
+    def _get_ganzhi(self) -> Dict:
+        """获取干支信息（使用lunar-python库）"""
+        try:
+            # 使用lunar-python获取准确的干支
+            solar = Solar.fromYmdHms(
+                self.timestamp.year,
+                self.timestamp.month,
+                self.timestamp.day,
+                self.timestamp.hour,
+                self.timestamp.minute,
+                self.timestamp.second
+            )
+            lunar = solar.getLunar()
+
+            return {
+                "year": lunar.getYearInGanZhi(),
+                "month": lunar.getMonthInGanZhi(),
+                "day": lunar.getDayInGanZhi(),
+                "hour": lunar.getTimeInGanZhi(),
+            }
+        except Exception as e:
+            # 降级处理：使用简化算法
+            year = self.timestamp.year
+            month = self.timestamp.month
+            day = self.timestamp.day
+            hour = self.timestamp.hour
+
+            return {
+                "year": f"{TIANGAN[year % 10]}{DIZHI[year % 12]}",
+                "month": f"{TIANGAN[month % 10]}{DIZHI[month % 12]}",
+                "day": f"{TIANGAN[day % 10]}{DIZHI[day % 12]}",
+                "hour": f"{TIANGAN[hour % 10]}{DIZHI[(hour // 2) % 12]}",
+            }
