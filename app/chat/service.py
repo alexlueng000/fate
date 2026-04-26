@@ -361,6 +361,35 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
         ValueError: If conversation doesn't exist or user doesn't own it
     """
     conv = get_conv(conversation_id)
+
+    # 如果会话不存在且用户已登录，尝试从数据库恢复
+    if not conv and user_id and db:
+        logger.info("conversation_not_found_attempting_recovery", conversation_id=conversation_id, user_id=user_id)
+        try:
+            # 从数据库读取用户的profile
+            from app.models.profile import UserProfile
+            profile = db.query(UserProfile).filter_by(user_id=user_id).first()
+            if profile:
+                # 重新初始化会话
+                base_prompt = utils.load_report_system_prompt_from_db()
+                composed = utils.build_full_system_prompt(base_prompt, [])
+
+                bazi_chart = profile.bazi_chart
+                paipan = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else {}
+
+                set_conv(conversation_id, {
+                    "pinned": composed,
+                    "history": [],
+                    "kb_index_dir": os.path.abspath(DEFAULT_KB_INDEX),
+                    "user_id": user_id,
+                    "db_conv_id": None,  # 原会话ID可能已失效
+                    "paipan": paipan or {},
+                })
+                conv = get_conv(conversation_id)
+                logger.info("conversation_recovered", conversation_id=conversation_id, user_id=user_id)
+        except Exception as e:
+            logger.error("conversation_recovery_failed", error=str(e), conversation_id=conversation_id)
+
     if not conv:
         raise ValueError("会话不存在，请先 /chat/start")
 
