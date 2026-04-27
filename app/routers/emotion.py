@@ -143,15 +143,19 @@ def create_emotion_record(
     db.add(record)
     db.flush()
 
-    # 转换响应
-    response_data = EmotionRecordResponse.model_validate(record)
-    if record.emotion_tags:
-        try:
-            response_data.emotion_tags = json.loads(record.emotion_tags)
-        except:
-            response_data.emotion_tags = []
-
-    return response_data
+    # 手动构建响应，解析 JSON 字段
+    return EmotionRecordResponse(
+        id=record.id,
+        user_id=record.user_id,
+        record_date=record.record_date,
+        solar_term=record.solar_term,
+        wuxing_element=record.wuxing_element,
+        emotion_score=record.emotion_score,
+        emotion_tags=json.loads(record.emotion_tags) if record.emotion_tags else None,
+        content=record.content,
+        ai_response=record.ai_response,
+        created_at=record.created_at
+    )
 
 
 @router.get("/records", response_model=List[EmotionRecordResponse])
@@ -168,16 +172,21 @@ def get_emotion_records(
         EmotionRecord.user_id == current_user.id
     ).order_by(desc(EmotionRecord.record_date)).limit(limit).offset(offset).all()
 
-    # 转换响应
+    # 手动构建响应列表，解析 JSON 字段
     result = []
     for record in records:
-        response_data = EmotionRecordResponse.model_validate(record)
-        if record.emotion_tags:
-            try:
-                response_data.emotion_tags = json.loads(record.emotion_tags)
-            except:
-                response_data.emotion_tags = []
-        result.append(response_data)
+        result.append(EmotionRecordResponse(
+            id=record.id,
+            user_id=record.user_id,
+            record_date=record.record_date,
+            solar_term=record.solar_term,
+            wuxing_element=record.wuxing_element,
+            emotion_score=record.emotion_score,
+            emotion_tags=json.loads(record.emotion_tags) if record.emotion_tags else None,
+            content=record.content,
+            ai_response=record.ai_response,
+            created_at=record.created_at
+        ))
 
     return result
 
@@ -199,14 +208,19 @@ def get_emotion_record(
     if not record:
         raise HTTPException(status_code=404, detail="情绪记录不存在")
 
-    response_data = EmotionRecordResponse.model_validate(record)
-    if record.emotion_tags:
-        try:
-            response_data.emotion_tags = json.loads(record.emotion_tags)
-        except:
-            response_data.emotion_tags = []
-
-    return response_data
+    # 手动构建响应，解析 JSON 字段
+    return EmotionRecordResponse(
+        id=record.id,
+        user_id=record.user_id,
+        record_date=record.record_date,
+        solar_term=record.solar_term,
+        wuxing_element=record.wuxing_element,
+        emotion_score=record.emotion_score,
+        emotion_tags=json.loads(record.emotion_tags) if record.emotion_tags else None,
+        content=record.content,
+        ai_response=record.ai_response,
+        created_at=record.created_at
+    )
 
 
 @router.get("/weekly-chart", response_model=WeeklyChartResponse)
