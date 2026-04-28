@@ -1,5 +1,6 @@
 # app/chat/sse.py
-from typing import Iterator, Callable
+import json
+from typing import Iterator, Callable, Union, Dict, Any
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
@@ -12,7 +13,18 @@ def should_stream(req: Request) -> bool:
         return True
     return False
 
-def sse_pack(data: str) -> bytes:
+def sse_pack(data: Union[str, Dict[str, Any]]) -> bytes:
+    """
+    Pack data into SSE format.
+
+    Args:
+        data: String or dict to send. Dicts are JSON-serialized.
+
+    Returns:
+        Encoded SSE message
+    """
+    if isinstance(data, dict):
+        data = json.dumps(data, ensure_ascii=False)
     return f"data: {data}\n\n".encode("utf-8")
 
 def sse_response(gen: Callable[[], Iterator[bytes]]) -> StreamingResponse:
