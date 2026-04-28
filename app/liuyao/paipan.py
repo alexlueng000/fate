@@ -51,6 +51,13 @@ TIANGAN = ["甲", "乙", "丙", "丁", "戊", "己", "庚", "辛", "壬", "癸"]
 # 地支
 DIZHI = ["子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥"]
 
+# 地支五行对应表
+DIZHI_WUXING = {
+    "子": "水", "丑": "土", "寅": "木", "卯": "木",
+    "辰": "土", "巳": "火", "午": "火", "未": "土",
+    "申": "金", "酉": "金", "戌": "土", "亥": "水",
+}
+
 # 纳甲表：八卦对应的地支
 NAJIA = {
     1: ["子", "寅", "辰", "午", "申", "戌"],  # 乾
@@ -271,8 +278,14 @@ class LiuyaoPaipan:
         # 获取干支信息
         ganzhi = self._get_ganzhi()
 
+        # 获取节气信息
+        jieqi = self._get_jieqi()
+
         # 配六兽（需要日干）
         lines_with_liushou = self._pei_liushou(lines_with_najia, ganzhi["day"])
+
+        # 配六亲（需要卦宫五行）
+        lines_with_liuqin = self._pei_liuqin(lines_with_liushou, gua_gong)
 
         return {
             "hexagram_id": self.hexagram_id,
@@ -291,8 +304,9 @@ class LiuyaoPaipan:
             "dong_yao": dong_yao,
             "shi_yao": shi_yao,
             "ying_yao": ying_yao,
-            "lines": lines_with_liushou,
+            "lines": lines_with_liuqin,
             "ganzhi": ganzhi,
+            "jieqi": jieqi,
         }
 
     def _generate_lines(self, shang_gua: int, xia_gua: int, dong_yao: int) -> List[Dict]:
@@ -418,6 +432,59 @@ class LiuyaoPaipan:
             result.append(line_copy)
         return result
 
+    def _pei_liuqin(self, lines: List[Dict], gua_gong: str) -> List[Dict]:
+        """配六亲（根据卦宫五行和地支五行）"""
+        # 卦宫五行（从卦宫名称提取）
+        gong_wuxing_map = {
+            "乾宫": "金", "兑宫": "金",
+            "离宫": "火",
+            "震宫": "木", "巽宫": "木",
+            "坎宫": "水",
+            "艮宫": "土", "坤宫": "土",
+        }
+
+        gong_wuxing = gong_wuxing_map.get(gua_gong, "金")
+
+        # 五行生克关系推导六亲
+        # 我生者为子孙，生我者为父母，克我者为官鬼，我克者为妻财，同我者为兄弟
+        wuxing_shengke = {
+            "金": {"生": "水", "克": "木", "被生": "土", "被克": "火", "同": "金"},
+            "木": {"生": "火", "克": "土", "被生": "水", "被克": "金", "同": "木"},
+            "水": {"生": "木", "克": "火", "被生": "金", "被克": "土", "同": "水"},
+            "火": {"生": "土", "克": "金", "被生": "木", "被克": "水", "同": "火"},
+            "土": {"生": "金", "克": "水", "被生": "火", "被克": "木", "同": "土"},
+        }
+
+        result = []
+        for line in lines:
+            line_copy = line.copy()
+            dizhi = line.get("dizhi", "")
+            if dizhi and dizhi in DIZHI_WUXING:
+                line_wuxing = DIZHI_WUXING[dizhi]
+                relations = wuxing_shengke.get(gong_wuxing, {})
+
+                if line_wuxing == relations.get("生"):
+                    liuqin = "子孙"
+                elif line_wuxing == relations.get("被生"):
+                    liuqin = "父母"
+                elif line_wuxing == relations.get("被克"):
+                    liuqin = "官鬼"
+                elif line_wuxing == relations.get("克"):
+                    liuqin = "妻财"
+                elif line_wuxing == relations.get("同"):
+                    liuqin = "兄弟"
+                else:
+                    liuqin = "未知"
+
+                line_copy["liuqin"] = liuqin
+                line_copy["wuxing"] = line_wuxing  # 添加五行信息
+            else:
+                line_copy["liuqin"] = "未知"
+                line_copy["wuxing"] = ""
+
+            result.append(line_copy)
+        return result
+
     def _get_gua_gong(self, shang_gua: int, xia_gua: int) -> str:
         """判断卦宫"""
         for gong_name, gua_list in BAGONG.items():
@@ -458,4 +525,31 @@ class LiuyaoPaipan:
                 "month": f"{TIANGAN[month % 10]}{DIZHI[month % 12]}",
                 "day": f"{TIANGAN[day % 10]}{DIZHI[day % 12]}",
                 "hour": f"{TIANGAN[hour % 10]}{DIZHI[(hour // 2) % 12]}",
+            }
+
+    def _get_jieqi(self) -> Dict:
+        """获取节气信息"""
+        try:
+            solar = Solar.fromYmdHms(
+                self.timestamp.year,
+                self.timestamp.month,
+                self.timestamp.day,
+                self.timestamp.hour,
+                self.timestamp.minute,
+                self.timestamp.second
+            )
+            lunar = solar.getLunar()
+
+            # 获取当前节气和下一个节气
+            jieqi = lunar.getCurrentJieQi()
+            next_jieqi = lunar.getNextJieQi()
+
+            return {
+                "current": jieqi.getName() if jieqi else None,
+                "next": next_jieqi.getName() if next_jieqi else None,
+            }
+        except Exception as e:
+            return {
+                "current": None,
+                "next": None,
             }
