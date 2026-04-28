@@ -53,8 +53,8 @@ fi
 # 5. 构建六爻知识库索引
 echo ""
 echo "[5/5] 构建六爻知识库索引..."
-echo "  执行命令: python kb_rag_mult.py kb_files/liuyao kb_index/liuyao"
-python kb_rag_mult.py kb_files/liuyao kb_index/liuyao
+echo "  执行命令: python kb_rag_mult.py ingest kb_files/liuyao kb_index/liuyao"
+python kb_rag_mult.py ingest kb_files/liuyao kb_index/liuyao
 
 # 验证索引文件
 if [ -f "kb_index/liuyao/chunks.json" ]; then
