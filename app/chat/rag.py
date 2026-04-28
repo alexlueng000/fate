@@ -46,8 +46,30 @@ def _load_and_cache_index(index_dir: str) -> Tuple[List[str], List[Dict], Any, D
         return cached
 
 
-def retrieve_kb(query: str, index_dir: str, k: int = 3) -> List[str]:
-    """从本地知识库取 Top-k 片段，返回带文件名的片段文本列表"""
+def retrieve_kb(query: str, index_dir: str = None, kb_type: str = "bazi", k: int = 3) -> List[str]:
+    """
+    从本地知识库取 Top-k 片段，返回带文件名的片段文本列表
+
+    Args:
+        query: 查询文本
+        index_dir: 索引目录（优先使用，如果指定则忽略 kb_type）
+        kb_type: 知识库类型 "bazi" | "liuyao"，默认 "bazi"
+        k: 返回片段数量
+
+    Returns:
+        带文件名的片段文本列表
+    """
+    # 如果没有指定 index_dir，根据 kb_type 自动构建
+    if index_dir is None:
+        index_dir = f"kb_index/{kb_type}"
+
+    # 检查索引目录是否存在
+    if not os.path.exists(index_dir):
+        from app.core.logging import get_logger
+        logger = get_logger("rag")
+        logger.warning(f"Knowledge base index not found: {index_dir}")
+        return []
+
     cached = _load_and_cache_index(index_dir)
     chunks = cached["chunks"]
     sources = cached["sources"]

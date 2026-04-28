@@ -220,3 +220,158 @@ def get_hexagram_count(
     ).count()
 
     return {"count": count}
+
+
+@router.post("/{hexagram_id}/interpret")
+def interpret_hexagram(
+    hexagram_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    AI解卦 - 流式输出
+    """
+    from fastapi.responses import StreamingResponse
+    from app.chat.deepseek_client import call_deepseek_stream, set_caller
+    from app.chat.sse import sse_pack
+    from app.chat.rag import retrieve_kb
+
+    # 查询卦象
+    hexagram = db.query(LiuyaoHexagram).filter(
+        LiuyaoHexagram.hexagram_id == hexagram_id,
+        LiuyaoHexagram.user_id == current_user.id
+    ).first()
+
+    if not hexagram:
+        raise HTTPException(status_code=404, detail="卦象不存在")
+
+    # 提取动爻
+    moving_lines = []
+    if hexagram.lines and "lines" in hexagram.lines:
+        for i, line in enumerate(hexagram.lines["lines"]):
+            if line.get("is_dong"):
+                moving_lines.append(i + 1)
+
+    moving_lines_str = "、".join([f"第{n}爻" for n in moving_lines]) if moving_lines else "无动爻"
+
+    # 检索六爻知识库
+    kb_query = f"{hexagram.main_gua} {hexagram.change_gua or ''} {hexagram.question}"
+    kb_passages = retrieve_kb(query=kb_query, kb_type="liuyao", k=5)
+    kb_context = "\n\n".join(kb_passages) if kb_passages else "（知识库暂无相关内容）"
+
+    # 构建解卦prompt
+    prompt = f"""你是一位精通《易经》的分析师，同时具备心理洞察与现实决策能力。
+
+你的目标不是预测未来，而是帮助用户看清局势、识别问题，并做出更好的选择。
+
+---
+
+参考知识：
+{kb_context}
+
+---
+
+输入：
+- 问题：{hexagram.question}
+- 本卦：{hexagram.main_gua}
+- 变卦：{hexagram.change_gua or "无变卦"}
+- 动爻：{moving_lines_str}
+
+---
+
+步骤一：识别真实问题
+
+不要重复用户的问题。你需要判断：
+
+- 用户真正焦虑的是什么
+- 当前的核心不确定性在哪里
+- 背后是决策问题，还是情绪问题
+
+用一句话点出来，让用户有"被看穿"的感觉。
+
+---
+
+步骤二：卦象解读
+
+说明：
+- 本卦代表当前状态
+- 变卦代表趋势变化
+- 动爻代表关键转折（如有）
+
+要求：具体、落地，不空泛
+
+---
+
+步骤三：底层模式识别
+
+指出1-2个关键矛盾，例如：
+- 想行动但犹豫
+- 控制欲 vs 放手
+- 短期收益 vs 长期稳定
+- 外部压力 vs 内在抗拒
+
+---
+
+步骤四：行动建议
+
+要求：
+- 可执行
+- 现实
+- 不做绝对判断
+
+避免：
+- "一定会"
+- "命中注定"
+
+---
+
+步骤五：收束总结
+
+给一句让人"停下来想一秒"的总结，而不是鸡汤
+
+---
+
+输出结构：
+
+### 1. 你真正面对的问题
+
+### 2. 当前状态｜{hexagram.main_gua}
+
+### 3. 发展趋势｜{hexagram.change_gua or "静卦"}
+
+### 4. 核心矛盾
+
+### 5. 行动建议
+
+### 6. 一句话提醒
+
+---
+
+风格：
+- 理性、克制
+- 略带锋芒（不要太温柔）
+- 像一个看透局势的人
+- 不神叨，不空话"""
+
+    messages = [{"role": "user", "content": prompt}]
+
+    def generate():
+        try:
+            set_caller("liuyao_interpret")
+            for chunk in call_deepseek_stream(messages):
+                yield sse_pack({"text": chunk, "replace": False})
+            yield sse_pack("[DONE]")
+        except Exception as e:
+            logger.error(f"解卦失败: {e}")
+            yield sse_pack({"error": str(e)})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
