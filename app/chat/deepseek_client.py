@@ -6,6 +6,7 @@ import threading
 import requests
 from typing import Dict, List, Iterator, Any, Optional
 from dotenv import load_dotenv
+from datetime import datetime
 
 load_dotenv()
 
@@ -13,6 +14,10 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
 # 全局默认模型，如果环境变量未设置，使用 deepseek-chat
 DEEPSEEK_MODEL   = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+
+# 日志目录配置
+PROMPT_LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "logs", "prompts")
+os.makedirs(PROMPT_LOG_DIR, exist_ok=True)
 
 _RETRY_TIMES = 3
 _RETRY_DELAY = 2  # 秒
@@ -28,6 +33,50 @@ def set_caller(name: str):
 
 def _get_caller() -> str:
     return getattr(_caller_var, "name", "unknown")
+
+
+def _log_prompt_to_file(messages: List[Dict[str, str]], model: str, caller: str):
+    """将发送到 DeepSeek 的完整 prompt 写入日志文件"""
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        log_filename = f"{timestamp}_{caller}_{model}.json"
+        log_path = os.path.join(PROMPT_LOG_DIR, log_filename)
+
+        log_data = {
+            "timestamp": datetime.now().isoformat(),
+            "caller": caller,
+            "model": model,
+            "messages": messages,
+            "message_count": len(messages),
+            "total_chars": sum(len(msg.get("content", "")) for msg in messages)
+        }
+
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, ensure_ascii=False, indent=2)
+
+        # 同时写入一个可读的文本版本
+        txt_path = log_path.replace(".json", ".txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(f"=== DeepSeek API Call Log ===\n")
+            f.write(f"Timestamp: {log_data['timestamp']}\n")
+            f.write(f"Caller: {caller}\n")
+            f.write(f"Model: {model}\n")
+            f.write(f"Message Count: {len(messages)}\n")
+            f.write(f"Total Characters: {log_data['total_chars']}\n")
+            f.write(f"\n{'='*80}\n\n")
+
+            for i, msg in enumerate(messages, 1):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                f.write(f"[Message {i}] Role: {role}\n")
+                f.write(f"{'-'*80}\n")
+                f.write(f"{content}\n")
+                f.write(f"\n{'='*80}\n\n")
+    except Exception as e:
+        # 日志写入失败不影响主流程
+        from app.core.logging import get_logger
+        logger = get_logger("deepseek_client")
+        logger.warning(f"Failed to write prompt log: {e}")
 
 
 def _log_api_call(
@@ -73,6 +122,11 @@ def _log_api_call(
 def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     use_model = model or DEEPSEEK_MODEL
+    caller = _get_caller()
+
+    # 记录发送到 DeepSeek 的完整 prompt
+    _log_prompt_to_file(messages, use_model, caller)
+
     payload = {
         "model": use_model,
         "messages": messages,
@@ -124,6 +178,11 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
     """
     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
     use_model = model or DEEPSEEK_MODEL
+    caller = _get_caller()
+
+    # 记录发送到 DeepSeek 的完整 prompt
+    _log_prompt_to_file(messages, use_model, caller)
+
     payload = {
         "model": use_model,
         "messages": messages,
