@@ -413,10 +413,9 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
         except Exception:
             kb_passages = []
 
-    composed = conv["pinned"]
-    if kb_passages:
-        kb_block = "\n\n".join(kb_passages)
-        composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+    # 每次对话都从 DB 重新加载最新 system prompt，确保管理员改动立即生效
+    base_prompt = utils.load_system_prompt_from_db()
+    composed = utils.build_full_system_prompt(base_prompt, kb_passages)
 
     recentN = 10
     history = conv.get("history", [])
@@ -572,10 +571,9 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         except Exception:
             kb_passages = []
 
-    composed = conv["pinned"]
-    if kb_passages:
-        kb_block = "\n\n".join(kb_passages)
-        composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+    composed = utils.build_full_system_prompt(
+        utils.load_system_prompt_from_db(), kb_passages
+    )
 
     recentN = 10
     trimmed_history = history[-recentN:]
