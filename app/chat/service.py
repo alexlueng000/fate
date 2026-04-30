@@ -305,9 +305,11 @@ def init_chat(
     """
     初始化会话（不生成 AI 开场白），仅创建会话并返回 conversation_id。
     已登录用户自动从档案读取命盘；也可直接传入 paipan。
+
+    注意：此函数用于 panel 页对话，使用通用 system_prompt（非 report_system_prompt）。
     """
-    # 读 system prompt
-    base_prompt = utils.load_report_system_prompt_from_db()
+    # 读 system prompt - 使用通用对话提示词，而非报告页提示词
+    base_prompt = utils.load_system_prompt_from_db()
     composed = utils.build_full_system_prompt(base_prompt, [])
 
     # 已登录用户从档案读命盘（若未传入 paipan）
@@ -370,8 +372,8 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
             from app.models.profile import UserProfile
             profile = db.query(UserProfile).filter_by(user_id=user_id).first()
             if profile:
-                # 重新初始化会话
-                base_prompt = utils.load_report_system_prompt_from_db()
+                # 重新初始化会话 - 使用通用对话提示词
+                base_prompt = utils.load_system_prompt_from_db()
                 composed = utils.build_full_system_prompt(base_prompt, [])
 
                 bazi_chart = profile.bazi_chart
