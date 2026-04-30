@@ -28,7 +28,7 @@ from app.core.logging import get_logger
 
 logger = get_logger("chat")
 
-DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
+DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index_bazi"))
 
 
 # ===================== 数据库持久化辅助函数 =====================
