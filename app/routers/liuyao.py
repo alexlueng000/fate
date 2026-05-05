@@ -74,6 +74,9 @@ class HexagramDetailResponse(BaseModel):
     lines: Optional[dict]
     ganzhi: Optional[dict]
     jiqi: Optional[dict]
+    shensha: Optional[str]
+    gua_shen: Optional[str]
+    lunar_date: Optional[str]
     created_at: datetime
 
     class Config:
@@ -138,7 +141,10 @@ def create_paipan(
         ying_yao=result.get("ying_yao"),
         lines={"lines": result.get("lines", [])},
         ganzhi=result.get("ganzhi"),
-        jiqi=None,  # 可以后续扩展
+        jiqi=result.get("jieqi"),
+        shensha=result.get("shensha"),
+        gua_shen=result.get("gua_shen"),
+        lunar_date=result.get("lunar_date"),
     )
 
     db.add(hexagram)

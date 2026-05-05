@@ -281,11 +281,20 @@ class LiuyaoPaipan:
         # 获取节气信息
         jieqi = self._get_jieqi()
 
+        # 获取神煞信息
+        shensha = self._get_shensha(ganzhi)
+
         # 配六兽（需要日干）
         lines_with_liushou = self._pei_liushou(lines_with_najia, ganzhi["day"])
 
         # 配六亲（需要卦宫五行）
         lines_with_liuqin = self._pei_liuqin(lines_with_liushou, gua_gong)
+
+        # 获取卦身信息
+        gua_shen = self._get_gua_shen(shi_yao, lines_with_liuqin)
+
+        # 获取农历日期
+        lunar_date = self._get_lunar_date()
 
         return {
             "hexagram_id": self.hexagram_id,
@@ -307,6 +316,9 @@ class LiuyaoPaipan:
             "lines": lines_with_liuqin,
             "ganzhi": ganzhi,
             "jieqi": jieqi,
+            "shensha": shensha,
+            "gua_shen": gua_shen,
+            "lunar_date": lunar_date,
         }
 
     def _generate_lines(self, shang_gua: int, xia_gua: int, dong_yao: int) -> List[Dict]:
@@ -544,12 +556,144 @@ class LiuyaoPaipan:
             jieqi = lunar.getCurrentJieQi()
             next_jieqi = lunar.getNextJieQi()
 
+            # 获取节气时间
+            current_time = None
+            next_time = None
+
+            if jieqi:
+                jieqi_solar = jieqi.getSolar()
+                if jieqi_solar:
+                    current_time = f"{jieqi_solar.getYear()}年{jieqi_solar.getMonth():02d}月{jieqi_solar.getDay():02d}日{jieqi_solar.getHour():02d}时{jieqi_solar.getMinute():02d}分{jieqi_solar.getSecond():02d}秒"
+
+            if next_jieqi:
+                next_jieqi_solar = next_jieqi.getSolar()
+                if next_jieqi_solar:
+                    next_time = f"{next_jieqi_solar.getYear()}年{next_jieqi_solar.getMonth():02d}月{next_jieqi_solar.getDay():02d}日{next_jieqi_solar.getHour():02d}时{next_jieqi_solar.getMinute():02d}分{next_jieqi_solar.getSecond():02d}秒"
+
             return {
                 "current": jieqi.getName() if jieqi else None,
                 "next": next_jieqi.getName() if next_jieqi else None,
+                "current_time": current_time,
+                "next_time": next_time,
             }
         except Exception as e:
             return {
                 "current": None,
                 "next": None,
+                "current_time": None,
+                "next_time": None,
             }
+
+    def _get_shensha(self, ganzhi: Dict) -> str:
+        """获取神煞信息（基于年支）"""
+        try:
+            # 提取年支
+            year_zhi = ganzhi["year"][1] if len(ganzhi["year"]) >= 2 else ""
+
+            if not year_zhi or year_zhi not in DIZHI:
+                return ""
+
+            # 神煞对照表（基于年支）
+            # 驿马：申子辰马在寅，寅午戌马在申，巳酉丑马在亥，亥卯未马在巳
+            yima_map = {
+                "申": "寅", "子": "寅", "辰": "寅",
+                "寅": "申", "午": "申", "戌": "申",
+                "巳": "亥", "酉": "亥", "丑": "亥",
+                "亥": "巳", "卯": "巳", "未": "巳",
+            }
+
+            # 桃花：申子辰在酉，寅午戌在卯，巳酉丑在午，亥卯未在子
+            taohua_map = {
+                "申": "酉", "子": "酉", "辰": "酉",
+                "寅": "卯", "午": "卯", "戌": "卯",
+                "巳": "午", "酉": "午", "丑": "午",
+                "亥": "子", "卯": "子", "未": "子",
+            }
+
+            # 华盖：申子辰在辰，寅午戌在戌，巳酉丑在丑，亥卯未在未
+            huagai_map = {
+                "申": "辰", "子": "辰", "辰": "辰",
+                "寅": "戌", "午": "戌", "戌": "戌",
+                "巳": "丑", "酉": "丑", "丑": "丑",
+                "亥": "未", "卯": "未", "未": "未",
+            }
+
+            # 将星：申子辰在子，寅午戌在午，巳酉丑在酉，亥卯未在卯
+            jiangxing_map = {
+                "申": "子", "子": "子", "辰": "子",
+                "寅": "午", "午": "午", "戌": "午",
+                "巳": "酉", "酉": "酉", "丑": "酉",
+                "亥": "卯", "卯": "卯", "未": "卯",
+            }
+
+            # 亡神：申子辰在亥，寅午戌在巳，巳酉丑在申，亥卯未在寅
+            wangshen_map = {
+                "申": "亥", "子": "亥", "辰": "亥",
+                "寅": "巳", "午": "巳", "戌": "巳",
+                "巳": "申", "酉": "申", "丑": "申",
+                "亥": "寅", "卯": "寅", "未": "寅",
+            }
+
+            yima = yima_map.get(year_zhi, "")
+            taohua = taohua_map.get(year_zhi, "")
+            huagai = huagai_map.get(year_zhi, "")
+            jiangxing = jiangxing_map.get(year_zhi, "")
+            wangshen = wangshen_map.get(year_zhi, "")
+
+            shensha_parts = []
+            if yima:
+                shensha_parts.append(f"驿马-{yima}")
+            if taohua:
+                shensha_parts.append(f"桃花-{taohua}")
+            if huagai:
+                shensha_parts.append(f"华盖-{huagai}")
+            if jiangxing:
+                shensha_parts.append(f"将星-{jiangxing}")
+            if wangshen:
+                shensha_parts.append(f"亡神-{wangshen}")
+
+            return f"年：{' '.join(shensha_parts)}" if shensha_parts else ""
+        except Exception as e:
+            return ""
+
+    def _get_gua_shen(self, shi_yao: int, lines: List[Dict]) -> str:
+        """获取卦身信息"""
+        try:
+            # 卦身 = 世爻所在地支
+            # 世身 = 世爻位置
+            if shi_yao and 1 <= shi_yao <= 6 and lines:
+                shi_line = lines[shi_yao - 1]
+                shi_dizhi = shi_line.get("dizhi", "")
+
+                # 判断外卦伏吟（简化版：检查是否有重复地支）
+                dizhi_list = [line.get("dizhi", "") for line in lines]
+                has_fuyin = len(dizhi_list) != len(set(dizhi_list))
+
+                fuyin_text = " 外卦伏吟" if has_fuyin else ""
+
+                return f"{shi_dizhi} 世身:{shi_yao}交{fuyin_text}"
+            return ""
+        except Exception as e:
+            return ""
+
+    def _get_lunar_date(self) -> str:
+        """获取农历日期"""
+        try:
+            solar = Solar.fromYmdHms(
+                self.timestamp.year,
+                self.timestamp.month,
+                self.timestamp.day,
+                self.timestamp.hour,
+                self.timestamp.minute,
+                self.timestamp.second
+            )
+            lunar = solar.getLunar()
+
+            # 格式：2026年3月7日申时
+            month_cn = lunar.getMonthInChinese()
+            day_cn = lunar.getDayInChinese()
+            time_zhi = lunar.getTimeZhi()
+
+            return f"{lunar.getYear()}年{month_cn}{day_cn}{time_zhi}时"
+        except Exception as e:
+            return ""

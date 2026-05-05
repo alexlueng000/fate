@@ -152,6 +152,24 @@ class LiuyaoHexagram(Base):
         comment="节气信息"
     )
 
+    shensha: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="神煞信息"
+    )
+
+    gua_shen: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="卦身信息"
+    )
+
+    lunar_date: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="农历日期"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False),
         server_default=func.current_timestamp(),
