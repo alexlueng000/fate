@@ -140,6 +140,12 @@ class LiuyaoHexagram(Base):
         comment="六爻详细数据（JSON格式）"
     )
 
+    change_lines: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="变卦六爻详细数据（JSON格式）"
+    )
+
     ganzhi: Mapped[Optional[dict]] = mapped_column(
         JSON,
         nullable=True,

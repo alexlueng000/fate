@@ -268,6 +268,12 @@ class LiuyaoPaipan:
         change_shang_gua = self._lines_to_gua(change_lines[3:])
         change_gua_name = LIUSHISI_GUA.get((change_shang_gua, change_xia_gua), "未知卦")
 
+        # 为变卦装纳甲、配六兽、配六亲
+        change_lines_with_najia = self._zhuang_najia(change_lines, change_xia_gua, change_shang_gua)
+        change_lines_with_liushou = self._pei_liushou(change_lines_with_najia, ganzhi["day"])
+        change_gua_gong = self._get_gua_gong(change_shang_gua, change_xia_gua)
+        change_lines_with_liuqin = self._pei_liuqin(change_lines_with_liushou, change_gua_gong)
+
         # 世应爻和卦宫
         shi_yao, ying_yao = self._calc_shi_ying(shang_gua, xia_gua)
         gua_gong = self._get_gua_gong(shang_gua, xia_gua)
@@ -314,6 +320,7 @@ class LiuyaoPaipan:
             "shi_yao": shi_yao,
             "ying_yao": ying_yao,
             "lines": lines_with_liuqin,
+            "change_lines": change_lines_with_liuqin,
             "ganzhi": ganzhi,
             "jieqi": jieqi,
             "shensha": shensha,

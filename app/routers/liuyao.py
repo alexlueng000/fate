@@ -72,6 +72,7 @@ class HexagramDetailResponse(BaseModel):
     shi_yao: Optional[int]
     ying_yao: Optional[int]
     lines: Optional[dict]
+    change_lines: Optional[dict]
     ganzhi: Optional[dict]
     jiqi: Optional[dict]
     shensha: Optional[str]
@@ -140,6 +141,7 @@ def create_paipan(
         shi_yao=result.get("shi_yao"),
         ying_yao=result.get("ying_yao"),
         lines={"lines": result.get("lines", [])},
+        change_lines={"lines": result.get("change_lines", [])},
         ganzhi=result.get("ganzhi"),
         jiqi=result.get("jieqi"),
         shensha=result.get("shensha"),
