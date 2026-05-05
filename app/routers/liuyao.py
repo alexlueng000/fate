@@ -260,6 +260,9 @@ def interpret_hexagram(
     kb_passages = retrieve_kb(query=kb_query, kb_type="liuyao", k=5)
     kb_context = "\n\n".join(kb_passages) if kb_passages else "（知识库暂无相关内容）"
 
+    # 性别显示
+    gender_display = {"male": "男", "female": "女", "unknown": "未知"}.get(hexagram.gender, "未知")
+
     # 构建解卦prompt
     prompt = f"""你是一位精通《易经》的分析师，同时具备心理洞察与现实决策能力。
 
@@ -274,6 +277,7 @@ def interpret_hexagram(
 
 输入：
 - 问题：{hexagram.question}
+- 性别：{gender_display}
 - 本卦：{hexagram.main_gua}
 - 变卦：{hexagram.change_gua or "无变卦"}
 - 动爻：{moving_lines_str}
