@@ -262,18 +262,6 @@ class LiuyaoPaipan:
         if lines is None:
             lines = self._generate_lines(shang_gua, xia_gua, dong_yao)
 
-        # 计算变卦
-        change_lines = self._calc_change_lines(lines, dong_yao)
-        change_xia_gua = self._lines_to_gua(change_lines[:3])
-        change_shang_gua = self._lines_to_gua(change_lines[3:])
-        change_gua_name = LIUSHISI_GUA.get((change_shang_gua, change_xia_gua), "未知卦")
-
-        # 为变卦装纳甲、配六兽、配六亲
-        change_lines_with_najia = self._zhuang_najia(change_lines, change_xia_gua, change_shang_gua)
-        change_lines_with_liushou = self._pei_liushou(change_lines_with_najia, ganzhi["day"])
-        change_gua_gong = self._get_gua_gong(change_shang_gua, change_xia_gua)
-        change_lines_with_liuqin = self._pei_liuqin(change_lines_with_liushou, change_gua_gong)
-
         # 世应爻和卦宫
         shi_yao, ying_yao = self._calc_shi_ying(shang_gua, xia_gua)
         gua_gong = self._get_gua_gong(shang_gua, xia_gua)
@@ -301,6 +289,18 @@ class LiuyaoPaipan:
 
         # 获取农历日期
         lunar_date = self._get_lunar_date()
+
+        # 计算变卦
+        change_lines = self._calc_change_lines(lines, dong_yao)
+        change_xia_gua = self._lines_to_gua(change_lines[:3])
+        change_shang_gua = self._lines_to_gua(change_lines[3:])
+        change_gua_name = LIUSHISI_GUA.get((change_shang_gua, change_xia_gua), "未知卦")
+
+        # 为变卦装纳甲、配六兽、配六亲
+        change_lines_with_najia = self._zhuang_najia(change_lines, change_xia_gua, change_shang_gua)
+        change_lines_with_liushou = self._pei_liushou(change_lines_with_najia, ganzhi["day"])
+        change_gua_gong = self._get_gua_gong(change_shang_gua, change_xia_gua)
+        change_lines_with_liuqin = self._pei_liuqin(change_lines_with_liushou, change_gua_gong)
 
         return {
             "hexagram_id": self.hexagram_id,
