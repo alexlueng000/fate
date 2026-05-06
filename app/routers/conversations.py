@@ -1,0 +1,253 @@
+"""
+对话历史 CRUD — 供历史记录页使用。
+支持八字 / 六爻两种类型的会话列表、详情与删除。
+"""
+from __future__ import annotations
+
+from datetime import datetime
+from typing import List, Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import select, func
+from sqlalchemy.orm import Session
+
+from app.db import get_db
+from app.deps import get_current_user_or_401
+from app.models.chat import Conversation, Message
+
+router = APIRouter(prefix="/conversations", tags=["conversations"])
+
+
+# ===== Response schemas =====
+
+class HexagramSummary(BaseModel):
+    hexagram_id: str
+    main_gua: Optional[str]
+    change_gua: Optional[str]
+    question: str
+
+
+class ConversationListItem(BaseModel):
+    id: int
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    last_user_message: Optional[str]
+    last_assistant_preview: Optional[str]
+    bazi_summary: Optional[str] = None   # 八字才有，格式 "丙午·癸巳·庚辰·癸未"
+    hexagram: Optional[HexagramSummary] = None  # 六爻才有
+
+
+class ConversationListResp(BaseModel):
+    items: List[ConversationListItem]
+    total: int
+    has_more: bool
+
+
+class MessageItem(BaseModel):
+    id: int
+    role: str
+    content: str
+    created_at: datetime
+
+
+class ConversationDetailResp(BaseModel):
+    id: int
+    type: Literal["bazi", "liuyao"]
+    title: str
+    created_at: datetime
+    updated_at: datetime
+    messages: List[MessageItem]
+    profile: Optional[dict] = None       # 八字才有（命盘快照）
+    profile_changed: bool = False        # 命盘是否已被用户修改过
+    hexagram: Optional[dict] = None      # 六爻才有
+
+
+# ===== 工具函数 =====
+
+def _four_pillars_summary(bazi_chart_snapshot: Optional[dict]) -> Optional[str]:
+    """从命盘快照提取 '年·月·日·时' 四柱摘要（每柱取前两字）。"""
+    if not bazi_chart_snapshot:
+        return None
+    try:
+        mingpan = bazi_chart_snapshot.get("mingpan", bazi_chart_snapshot)
+        fp = mingpan.get("four_pillars", {})
+        parts = []
+        for key in ("year", "month", "day", "hour"):
+            pillar = fp.get(key, {})
+            stem = pillar.get("stem", "")
+            branch = pillar.get("branch", "")
+            parts.append(f"{stem}{branch}"[:2] if stem or branch else "?")
+        return "·".join(parts) if any(p != "?" for p in parts) else None
+    except Exception:
+        return None
+
+
+def _preview(text: Optional[str], limit: int = 60) -> Optional[str]:
+    if not text:
+        return None
+    text = text.strip()
+    return text[:limit] + "…" if len(text) > limit else text
+
+
+# ===== 路由 =====
+
+@router.get("", response_model=ConversationListResp)
+def list_conversations(
+    type: Literal["bazi", "liuyao"] = Query(..., description="会话类型"),
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_or_401),
+):
+    # 按类型过滤
+    base_q = select(Conversation).where(Conversation.user_id == user_id)
+    if type == "bazi":
+        base_q = base_q.where(
+            Conversation.profile_id.is_not(None),
+            Conversation.liuyao_hexagram_id.is_(None),
+        )
+    else:
+        base_q = base_q.where(Conversation.liuyao_hexagram_id.is_not(None))
+
+    total = db.scalar(
+        select(func.count()).select_from(base_q.subquery())
+    ) or 0
+
+    rows: List[Conversation] = db.scalars(
+        base_q.order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+        .limit(limit)
+        .offset(offset)
+    ).all()
+
+    items: List[ConversationListItem] = []
+    for conv in rows:
+        # 取最后一条 user / assistant 消息预览
+        last_user = db.scalar(
+            select(Message.content)
+            .where(Message.conversation_id == conv.id, Message.role == "user")
+            .order_by(Message.id.desc())
+            .limit(1)
+        )
+        last_asst = db.scalar(
+            select(Message.content)
+            .where(Message.conversation_id == conv.id, Message.role == "assistant")
+            .order_by(Message.id.desc())
+            .limit(1)
+        )
+
+        hexagram_summary: Optional[HexagramSummary] = None
+        if type == "liuyao" and conv.liuyao_hexagram_id:
+            from app.models.liuyao import LiuyaoHexagram
+            hx = db.get(LiuyaoHexagram, conv.liuyao_hexagram_id)
+            if hx:
+                hexagram_summary = HexagramSummary(
+                    hexagram_id=hx.hexagram_id,
+                    main_gua=hx.main_gua,
+                    change_gua=hx.change_gua,
+                    question=hx.question or "",
+                )
+
+        items.append(ConversationListItem(
+            id=conv.id,
+            title=conv.title,
+            created_at=conv.created_at,
+            updated_at=conv.updated_at,
+            last_user_message=_preview(last_user),
+            last_assistant_preview=_preview(last_asst),
+            bazi_summary=_four_pillars_summary(conv.bazi_chart_snapshot) if type == "bazi" else None,
+            hexagram=hexagram_summary,
+        ))
+
+    return ConversationListResp(
+        items=items,
+        total=total,
+        has_more=(offset + limit) < total,
+    )
+
+
+@router.get("/{conversation_id}", response_model=ConversationDetailResp)
+def get_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_or_401),
+):
+    conv = db.get(Conversation, conversation_id)
+    if not conv or conv.user_id != user_id:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    conv_type: Literal["bazi", "liuyao"] = (
+        "liuyao" if conv.liuyao_hexagram_id else "bazi"
+    )
+
+    # 消息列表（按 id 升序）
+    msgs = db.scalars(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.id.asc())
+    ).all()
+
+    message_items = [
+        MessageItem(id=m.id, role=m.role, content=m.content, created_at=m.created_at)
+        for m in msgs
+    ]
+
+    profile_data: Optional[dict] = None
+    profile_changed = False
+    hexagram_data: Optional[dict] = None
+
+    if conv_type == "bazi":
+        # 返回快照，而非 live profile，保证历史会话上下文自洽
+        profile_data = {"bazi_chart": conv.bazi_chart_snapshot} if conv.bazi_chart_snapshot else None
+
+        # 检测命盘是否已被修改
+        if conv.profile_id and conv.bazi_chart_snapshot:
+            from app.models.profile import UserProfile
+            live_profile = db.get(UserProfile, conv.profile_id)
+            if live_profile and live_profile.bazi_chart != conv.bazi_chart_snapshot:
+                profile_changed = True
+    else:
+        if conv.liuyao_hexagram_id:
+            from app.models.liuyao import LiuyaoHexagram
+            hx = db.get(LiuyaoHexagram, conv.liuyao_hexagram_id)
+            if hx:
+                hexagram_data = {
+                    "id": hx.id,
+                    "hexagram_id": hx.hexagram_id,
+                    "question": hx.question,
+                    "main_gua": hx.main_gua,
+                    "change_gua": hx.change_gua,
+                    "timestamp": hx.timestamp.isoformat() if hx.timestamp else None,
+                    "location": hx.location,
+                    "dong_yao": hx.dong_yao,
+                    "gua_gong": getattr(hx, "gua_gong", None),
+                    "shensha": getattr(hx, "shensha", None),
+                    "gua_shen": getattr(hx, "gua_shen", None),
+                    "lunar_date": getattr(hx, "lunar_date", None),
+                }
+
+    return ConversationDetailResp(
+        id=conv.id,
+        type=conv_type,
+        title=conv.title,
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+        messages=message_items,
+        profile=profile_data,
+        profile_changed=profile_changed,
+        hexagram=hexagram_data,
+    )
+
+
+@router.delete("/{conversation_id}", status_code=204)
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_or_401),
+):
+    conv = db.get(Conversation, conversation_id)
+    if not conv or conv.user_id != user_id:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    db.delete(conv)
+    db.commit()

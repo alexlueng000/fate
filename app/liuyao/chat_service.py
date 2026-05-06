@@ -252,6 +252,45 @@ def _send_streaming_message(
                          但实际让 AI 看到的是完整 prompt，因此 prompt 与 history 内容一致。
     """
     conv = get_conv(conversation_id)
+
+    # 服务重启后 in-memory 丢失，尝试从 DB 恢复
+    if not conv:
+        try:
+            raw_id = conversation_id.removeprefix("conv_")
+            db_conv_id_int = int(raw_id) if raw_id.isdigit() else None
+            if db_conv_id_int:
+                from app.models.chat import Conversation as ConvModel, Message as MsgModel
+                db_conv = db.get(ConvModel, db_conv_id_int)
+                if db_conv and db_conv.user_id == user_id and db_conv.liuyao_hexagram_id:
+                    from app.models.liuyao import LiuyaoHexagram
+                    hexagram = db.get(LiuyaoHexagram, db_conv.liuyao_hexagram_id)
+                    if hexagram:
+                        base_prompt = utils.load_liuyao_system_prompt_from_db()
+                        system_prompt = build_system_prompt(hexagram, [], base_prompt=base_prompt)
+                        db_msgs = (
+                            db.query(MsgModel)
+                            .filter_by(conversation_id=db_conv_id_int)
+                            .order_by(MsgModel.id)
+                            .all()
+                        )
+                        history = [
+                            {"role": m.role, "content": m.content}
+                            for m in db_msgs
+                            if m.role in ("user", "assistant")
+                        ]
+                        set_conv(conversation_id, {
+                            "pinned": system_prompt,
+                            "history": history,
+                            "user_id": user_id,
+                            "db_conv_id": db_conv_id_int,
+                            "liuyao_hexagram_id": hexagram.id,
+                            "kind": "liuyao",
+                        })
+                        conv = get_conv(conversation_id)
+                        logger.info("liuyao_conversation_recovered", conversation_id=conversation_id, msg_count=len(history))
+        except Exception as e:
+            logger.error("liuyao_conversation_recovery_failed", error=str(e), conversation_id=conversation_id)
+
     if not conv:
         raise ValueError("会话不存在，请先调用 /liuyao/{id}/chat/start")
 

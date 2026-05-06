@@ -33,10 +33,21 @@ DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 # ===================== 数据库持久化辅助函数 =====================
 
-def _create_db_conversation(db: Session, user_id: int, title: str = "八字解读", profile_id: Optional[int] = None) -> int:
+def _create_db_conversation(
+    db: Session,
+    user_id: int,
+    title: str = "八字解读",
+    profile_id: Optional[int] = None,
+    bazi_chart_snapshot: Optional[Dict[str, Any]] = None,
+) -> int:
     """创建数据库对话记录，返回对话ID"""
     from app.models.chat import Conversation
-    conv = Conversation(user_id=user_id, title=title, profile_id=profile_id)
+    conv = Conversation(
+        user_id=user_id,
+        title=title,
+        profile_id=profile_id,
+        bazi_chart_snapshot=bazi_chart_snapshot,
+    )
     db.add(conv)
     db.commit()
     db.refresh(conv)
@@ -131,7 +142,11 @@ def start_chat(
             logger.info("start_chat_init", user_id=user_id, db_present=db is not None)
             if user_id and db:
                 try:
-                    db_conv_id = _create_db_conversation(db, user_id, "八字解读", profile_id=profile_id)
+                    db_conv_id = _create_db_conversation(
+                        db, user_id, "八字解读",
+                        profile_id=profile_id,
+                        bazi_chart_snapshot=paipan,
+                    )
                     cid = f"conv_{db_conv_id}"  # 使用数据库ID
                     logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid, profile_id=profile_id)
                 except Exception as e:
@@ -325,7 +340,11 @@ def init_chat(
     db_conv_id: Optional[int] = None
     if user_id and db:
         try:
-            db_conv_id = _create_db_conversation(db, user_id, "八字解读", profile_id=profile_id)
+            db_conv_id = _create_db_conversation(
+                db, user_id, "八字解读",
+                profile_id=profile_id,
+                bazi_chart_snapshot=paipan,
+            )
             cid = f"conv_{db_conv_id}"
         except Exception:
             cid = f"conv_{uuid.uuid4().hex[:8]}"
@@ -368,27 +387,52 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
     if not conv and user_id and db:
         logger.info("conversation_not_found_attempting_recovery", conversation_id=conversation_id, user_id=user_id)
         try:
-            # 从数据库读取用户的profile
-            from app.models.profile import UserProfile
-            profile = db.query(UserProfile).filter_by(user_id=user_id).first()
-            if profile:
-                # 重新初始化会话 - 使用通用对话提示词
-                base_prompt = utils.load_system_prompt_from_db()
-                composed = utils.build_full_system_prompt(base_prompt, [])
+            from app.models.chat import Conversation as ConvModel, Message as MsgModel
+            # conversation_id 格式：conv_{db_id}
+            raw_id = conversation_id.removeprefix("conv_")
+            db_conv_id_int = int(raw_id) if raw_id.isdigit() else None
 
-                bazi_chart = profile.bazi_chart
-                paipan = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else {}
+            if db_conv_id_int:
+                db_conv = db.get(ConvModel, db_conv_id_int)
+                if db_conv and db_conv.user_id == user_id:
+                    # 用会话创建时的命盘快照（而非当前 live profile）
+                    snapshot = db_conv.bazi_chart_snapshot or {}
+                    paipan = snapshot.get("mingpan", snapshot) if isinstance(snapshot, dict) else {}
 
-                set_conv(conversation_id, {
-                    "pinned": composed,
-                    "history": [],
-                    "kb_index_dir": os.path.abspath(DEFAULT_KB_INDEX),
-                    "user_id": user_id,
-                    "db_conv_id": None,  # 原会话ID可能已失效
-                    "paipan": paipan or {},
-                })
-                conv = get_conv(conversation_id)
-                logger.info("conversation_recovered", conversation_id=conversation_id, user_id=user_id)
+                    # 若快照为空则 fallback 到当前 profile
+                    if not paipan:
+                        from app.models.profile import UserProfile
+                        profile = db.query(UserProfile).filter_by(user_id=user_id).first()
+                        if profile and profile.bazi_chart:
+                            bazi_chart = profile.bazi_chart
+                            paipan = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else {}
+
+                    base_prompt = utils.load_system_prompt_from_db()
+                    composed = utils.build_full_system_prompt(base_prompt, [])
+
+                    # 从 DB 恢复历史消息，确保 AI 能看到之前的对话
+                    db_msgs = (
+                        db.query(MsgModel)
+                        .filter_by(conversation_id=db_conv_id_int)
+                        .order_by(MsgModel.id)
+                        .all()
+                    )
+                    history = [
+                        {"role": m.role, "content": m.content}
+                        for m in db_msgs
+                        if m.role in ("user", "assistant")
+                    ]
+
+                    set_conv(conversation_id, {
+                        "pinned": composed,
+                        "history": history,
+                        "kb_index_dir": os.path.abspath(DEFAULT_KB_INDEX),
+                        "user_id": user_id,
+                        "db_conv_id": db_conv_id_int,
+                        "paipan": paipan,
+                    })
+                    conv = get_conv(conversation_id)
+                    logger.info("conversation_recovered", conversation_id=conversation_id, user_id=user_id, msg_count=len(history))
         except Exception as e:
             logger.error("conversation_recovery_failed", error=str(e), conversation_id=conversation_id)
 

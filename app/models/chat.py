@@ -9,6 +9,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     DateTime,
@@ -59,6 +60,12 @@ class Conversation(Base):
         index=True,
         nullable=True,
         comment="关联的六爻卦象ID（外键 liuyao_hexagrams.id）"
+    )
+
+    bazi_chart_snapshot: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="会话创建时的命盘快照，防止用户改命盘后历史会话上下文错乱"
     )
 
     title: Mapped[str] = mapped_column(
