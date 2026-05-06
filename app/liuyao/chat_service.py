@@ -100,6 +100,26 @@ def _post_process(reply_raw: str) -> str:
     return reply
 
 
+def _print_deepseek_payload(tag: str, messages: List[dict]) -> None:
+    """
+    把发往 DeepSeek 的完整 messages 直接打印到控制台，方便调试。
+    生产环境可通过环境变量 LIUYAO_PRINT_PAYLOAD=0 关闭。
+    """
+    import os
+    if os.getenv("LIUYAO_PRINT_PAYLOAD", "1") == "0":
+        return
+    sep = "=" * 88
+    total = sum(len(m.get("content", "")) for m in messages)
+    print(f"\n{sep}", flush=True)
+    print(f"[deepseek][liuyao:{tag}] {len(messages)} messages, total {total} chars", flush=True)
+    for i, m in enumerate(messages):
+        role = m.get("role", "?")
+        content = m.get("content", "") or ""
+        print(f"\n── #{i} role={role} (len={len(content)}) ──", flush=True)
+        print(content, flush=True)
+    print(f"{sep}\n", flush=True)
+
+
 def start_liuyao_chat(
     hexagram: LiuyaoHexagram,
     request: Request,
@@ -142,6 +162,7 @@ def start_liuyao_chat(
     })
 
     messages = _build_messages(system_prompt, [], extra_user=opening_user_msg)
+    _print_deepseek_payload("start", messages)
 
     if should_stream(request):
         def gen() -> Iterator[bytes]:
@@ -248,6 +269,7 @@ def _send_streaming_message(
     persisted_user_msg = display_user_message or user_message
 
     messages = _build_messages(composed_system, history, extra_user=user_message)
+    _print_deepseek_payload(caller_tag, messages)
 
     t0 = utils.now_ms()
 
@@ -392,6 +414,7 @@ def regenerate_liuyao_chat(
     truncated = history[: last_user_idx + 1]
     composed_system = conv.get("pinned") or ""
     messages = [{"role": "system", "content": composed_system}, *truncated]
+    _print_deepseek_payload("regenerate", messages)
 
     set_caller("liuyao_chat_regenerate")
     reply = _post_process(call_deepseek(messages))
