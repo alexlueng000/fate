@@ -15,6 +15,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects import mysql
+from sqlalchemy.dialects.mysql import BIGINT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base  # 你的 declarative_base()
@@ -50,6 +51,14 @@ class Conversation(Base):
         index=True,
         nullable=True,
         comment="关联的命盘档案ID（外键 user_profiles.id）"
+    )
+
+    liuyao_hexagram_id: Mapped[Optional[int]] = mapped_column(
+        BIGINT(unsigned=True),
+        ForeignKey("liuyao_hexagrams.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+        comment="关联的六爻卦象ID（外键 liuyao_hexagrams.id）"
     )
 
     title: Mapped[str] = mapped_column(

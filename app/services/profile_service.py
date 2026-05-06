@@ -117,7 +117,7 @@ class ProfileService:
                              "birth_location", "birth_longitude", "birth_latitude"]:
                     needs_recalculation = True
 
-        # 如果关键字段变更，重新计算命盘
+        # 如果关键字段变更，重新计算命盘并作废旧的 AI 命理报告
         if needs_recalculation:
             bazi_chart = ProfileService._calculate_bazi_chart(
                 gender=profile.gender,
@@ -129,6 +129,7 @@ class ProfileService:
                 birth_latitude=profile.birth_latitude,
             )
             profile.bazi_chart = bazi_chart
+            profile.ai_report = None
 
         db.commit()
         db.refresh(profile)

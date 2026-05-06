@@ -14,6 +14,19 @@ from ..deps import get_current_user
 from ..models import User
 from ..models.liuyao import LiuyaoHexagram
 from app.liuyao.paipan import LiuyaoPaipan
+from app.liuyao.chat_service import (
+    quick_liuyao_chat,
+    regenerate_liuyao_chat,
+    send_liuyao_chat,
+    start_liuyao_chat,
+)
+from app.schemas.liuyao_chat import (
+    LiuyaoChatQuickReq,
+    LiuyaoChatRegenerateReq,
+    LiuyaoChatReply,
+    LiuyaoChatSendReq,
+)
+from app.services.quota import QuotaService
 from app.core.logging import get_logger
 import json
 
@@ -387,3 +400,130 @@ def interpret_hexagram(
             "X-Accel-Buffering": "no",
         }
     )
+
+
+# ==================== Chat (multi-turn) ====================
+
+def _load_user_hexagram(db: Session, hexagram_id: str, user: User) -> LiuyaoHexagram:
+    hexagram = db.query(LiuyaoHexagram).filter(
+        LiuyaoHexagram.hexagram_id == hexagram_id,
+        LiuyaoHexagram.user_id == user.id,
+    ).first()
+    if not hexagram:
+        raise HTTPException(status_code=404, detail="卦象不存在")
+    return hexagram
+
+
+@router.post("/{hexagram_id}/chat/start")
+def liuyao_chat_start(
+    hexagram_id: str,
+    request: Request,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    开启六爻多轮对话：消耗 1 次 liuyao_chat 配额，返回流式或一次性 reply。
+    """
+    hexagram = _load_user_hexagram(db, hexagram_id, current_user)
+
+    allowed, msg, _ = QuotaService.check_and_consume(db, current_user.id, "liuyao_chat")
+    if not allowed:
+        raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
+
+    result = start_liuyao_chat(
+        hexagram=hexagram,
+        request=request,
+        user_id=current_user.id,
+        db=db,
+    )
+
+    from fastapi.responses import StreamingResponse
+    if isinstance(result, StreamingResponse):
+        return result
+    cid, reply = result
+    return LiuyaoChatReply(conversation_id=cid, reply=reply)
+
+
+@router.post("/{hexagram_id}/chat")
+def liuyao_chat_send(
+    hexagram_id: str,
+    req: LiuyaoChatSendReq,
+    request: Request,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+):
+    """续聊：不消耗配额。"""
+    _load_user_hexagram(db, hexagram_id, current_user)
+    try:
+        result = send_liuyao_chat(
+            conversation_id=req.conversation_id,
+            message=req.message,
+            request=request,
+            user_id=current_user.id,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404 if "会话不存在" in str(e) else 400,
+            detail=str(e),
+        )
+
+    from fastapi.responses import StreamingResponse
+    if isinstance(result, StreamingResponse):
+        return result
+    return LiuyaoChatReply(conversation_id=req.conversation_id, reply=result)
+
+
+@router.post("/{hexagram_id}/chat/quick")
+def liuyao_chat_quick(
+    hexagram_id: str,
+    req: LiuyaoChatQuickReq,
+    request: Request,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    快捷分析：人物画像 / 应期。不消耗配额。
+    """
+    _load_user_hexagram(db, hexagram_id, current_user)
+    try:
+        result = quick_liuyao_chat(
+            conversation_id=req.conversation_id,
+            kind=req.kind,
+            request=request,
+            user_id=current_user.id,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404 if "会话不存在" in str(e) else 400,
+            detail=str(e),
+        )
+
+    from fastapi.responses import StreamingResponse
+    if isinstance(result, StreamingResponse):
+        return result
+    return LiuyaoChatReply(conversation_id=req.conversation_id, reply=result)
+
+
+@router.post("/{hexagram_id}/chat/regenerate", response_model=LiuyaoChatReply)
+def liuyao_chat_regenerate(
+    hexagram_id: str,
+    req: LiuyaoChatRegenerateReq,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """重新生成上一条 assistant 回复（一次性）。"""
+    _load_user_hexagram(db, hexagram_id, current_user)
+    try:
+        reply = regenerate_liuyao_chat(
+            conversation_id=req.conversation_id,
+            user_id=current_user.id,
+            db=db,
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=404 if "会话不存在" in str(e) else 400,
+            detail=str(e),
+        )
+    return LiuyaoChatReply(conversation_id=req.conversation_id, reply=reply)
