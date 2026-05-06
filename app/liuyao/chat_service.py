@@ -124,7 +124,9 @@ def start_liuyao_chat(
         logger.warning("liuyao_kb_retrieve_failed", error=str(e))
         kb_passages = []
 
-    system_prompt = build_system_prompt(hexagram, kb_passages)
+    # 优先读 admin 后台维护的 prompt；为空时 build_system_prompt 内部回退到默认值
+    base_prompt = utils.load_liuyao_system_prompt_from_db()
+    system_prompt = build_system_prompt(hexagram, kb_passages, base_prompt=base_prompt)
     opening_user_msg = build_opening_user_message(hexagram)
 
     db_conv_id = _create_db_conversation(db, user_id, hexagram)

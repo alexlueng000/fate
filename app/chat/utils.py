@@ -230,6 +230,33 @@ def load_report_system_prompt_from_db(ttl: int = _PROMPT_CACHE_TTL) -> str:
         return content
 
 
+def load_liuyao_system_prompt_from_db(ttl: int = _PROMPT_CACHE_TTL) -> str:
+    """
+    从数据库加载六爻对话专用提示词（带缓存）。
+
+    读取 liuyao_system_prompt；不存在则返回空串（由调用方使用模块内默认 prompt）。
+    """
+    cache_key = "liuyao_system_prompt"
+    now = time.time()
+
+    with _prompt_cache_lock:
+        if cache_key in _prompt_cache:
+            content, expiry = _prompt_cache[cache_key]
+            if now < expiry:
+                return content
+
+    with db_session() as db:
+        cfg = fetch_latest_config(db, "liuyao_system_prompt")
+        if not cfg:
+            return ""
+        content = (cfg["value_json"] or {}).get("content") or ""
+
+        with _prompt_cache_lock:
+            _prompt_cache[cache_key] = (content, now + ttl)
+
+        return content
+
+
 
     """Clear the system prompt cache."""
     with _prompt_cache_lock:

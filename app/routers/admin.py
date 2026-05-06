@@ -31,7 +31,7 @@ def admin_required():
 # -----------------------------
 # 配置
 # -----------------------------
-ALLOWED_KEYS = {"system_prompt", "quick_buttons", "report_system_prompt"}
+ALLOWED_KEYS = {"system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt"}
 CACHE_PREFIX = "cfg:"  # Redis 前缀，例如 cfg:system_prompt:v1
 CACHE_VER = "v1"
 
@@ -44,7 +44,7 @@ router = APIRouter(
 # ========== Pydantic Schemas ==========
 
 class ConfigSaveReq(BaseModel):
-    key: Literal["system_prompt", "quick_buttons", "report_system_prompt"]
+    key: Literal["system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt"]
     value_json: dict = Field(..., description="完整配置 JSON")
     comment: Optional[str] = Field(None, max_length=255)
 
@@ -52,7 +52,7 @@ class ConfigSaveReq(BaseModel):
     def validate_shape(cls, v, values):
         key = values.get("key")
         # 轻量 JSON 结构校验，可按需加严
-        if key in ("system_prompt", "report_system_prompt"):
+        if key in ("system_prompt", "report_system_prompt", "liuyao_system_prompt"):
             if not isinstance(v.get("content"), str) or not v["content"].strip():
                 raise ValueError(f"{key}.value_json.content 必须为非空字符串")
         elif key == "quick_buttons":
@@ -72,7 +72,7 @@ class ConfigSaveReq(BaseModel):
 
 
 class ConfigRollbackReq(BaseModel):
-    key: Literal["system_prompt", "quick_buttons", "report_system_prompt"]
+    key: Literal["system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt"]
     version: int = Field(..., ge=1, description="目标历史版本号")
     comment: Optional[str] = Field(None, max_length=255)
 
