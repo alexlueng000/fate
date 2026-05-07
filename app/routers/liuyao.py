@@ -452,8 +452,11 @@ def liuyao_chat_send(
     db: Session = Depends(get_db_tx),
     current_user: User = Depends(get_current_user),
 ):
-    """续聊：不消耗配额。"""
+    """续聊：每次提问消耗 1 次 liuyao_chat 配额（与 /chat/start 一致）。"""
     _load_user_hexagram(db, hexagram_id, current_user)
+    allowed, msg, _ = QuotaService.check_and_consume(db, current_user.id, "liuyao_chat")
+    if not allowed:
+        raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
     try:
         result = send_liuyao_chat(
             conversation_id=req.conversation_id,
@@ -483,9 +486,12 @@ def liuyao_chat_quick(
     current_user: User = Depends(get_current_user),
 ):
     """
-    快捷分析：人物画像 / 应期。不消耗配额。
+    快捷分析：人物画像 / 应期。每次消耗 1 次 liuyao_chat 配额。
     """
     _load_user_hexagram(db, hexagram_id, current_user)
+    allowed, msg, _ = QuotaService.check_and_consume(db, current_user.id, "liuyao_chat")
+    if not allowed:
+        raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
     try:
         result = quick_liuyao_chat(
             conversation_id=req.conversation_id,

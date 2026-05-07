@@ -29,12 +29,9 @@ def chat_init(
     """
     初始化会话（不生成 AI 开场白），仅返回 conversation_id。
     前端展示静态开场白，用户发消息后直接调 /chat 接口。
+    不消耗配额——配额仅在用户实际提问（/chat/start 或 /chat）时扣减。
     """
     user_id = current_user.id if current_user else None
-    if user_id:
-        allowed, msg, _ = QuotaService.check_and_consume(db, user_id, "chat")
-        if not allowed:
-            raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
     cid = init_chat(user_id=user_id, db=db)
     return ChatInitResp(conversation_id=cid)
 
@@ -103,10 +100,16 @@ def chat_send(
 ):
     """
     续聊：支持 SSE（根据 Accept 或 ?stream=1）
-    - 续聊不消耗配额（配额仅在开始对话时消耗）
+    - 已登录用户每次提问都消耗 1 次八字配额（与 /chat/start 一致）
+    - 未登录用户暂不限额（内测）
     """
     logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
     user_id = current_user.id if current_user else None
+    if user_id:
+        allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "chat")
+        if not allowed:
+            raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
+        logger.info("quota_consumed", user_id=user_id, remaining=remaining, endpoint="chat_send")
     try:
         result = send_chat(req.conversation_id, req.message, request, user_id=user_id, db=db)
     except ValueError as e:
