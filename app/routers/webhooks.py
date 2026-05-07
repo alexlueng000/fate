@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db_tx
 from app.models import WebhookLog, Order
 from app.services import payments as pay_service
-from app.services.quota import QuotaService
+from app.services.products import grant_product_quota
 from app.config import settings
 
 # cryptography for RSA verify & AES-GCM decrypt
@@ -138,8 +138,8 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 # 支付成功
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
-                # ✅ 发放权益：基于订单的用户与商品编码（lazy-load OK）
-                QuotaService.add_quota(db, order.user_id, order.product.quota_amount, "chat", "purchase")  # type: ignore[attr-defined]
+                # ✅ 发放权益（套餐内含 bazi / liuyao 多类型次数）
+                grant_product_quota(db, user_id=order.user_id, product=order.product, source="purchase")  # type: ignore[arg-type]
 
                 processed = True
 
@@ -161,8 +161,8 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
 
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
-                # ✅ 发放权益（开发模式同样执行）
-                QuotaService.add_quota(db, order.user_id, order.product.quota_amount, "chat", "purchase")  # type: ignore[attr-defined]
+                # ✅ 发放权益（开发模式同样执行；套餐多类型次数）
+                grant_product_quota(db, user_id=order.user_id, product=order.product, source="purchase")  # type: ignore[arg-type]
 
                 processed = True
 
@@ -215,7 +215,7 @@ async def alipay_callback(request: Request, db: Session = Depends(get_db_tx)):
             order = db.query(Order).filter(Order.out_trade_no == str(out_trade_no)).first()  # type: ignore
             if order:
                 pay_service.mark_success(db, order=order, transaction_id=str(trade_no), raw=payload_text)
-                QuotaService.add_quota(db, order.user_id, order.product.quota_amount, "chat", "purchase")  # type: ignore[attr-defined]
+                grant_product_quota(db, user_id=order.user_id, product=order.product, source="purchase")  # type: ignore[arg-type]
                 processed = True
 
         _log_webhook(db, source="ALIPAY", event_type=trade_status, payload_text=payload_text, processed=processed)

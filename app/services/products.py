@@ -1,12 +1,13 @@
 # app/services/products.py
 from __future__ import annotations
 
-from typing import Optional, List
+from typing import Dict, Optional, List
 
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.models import Product
+from app.services.quota import QuotaService
 
 
 def list_products(
@@ -87,3 +88,34 @@ def get_by_id(
     if active_only is True:
         stmt = stmt.where(Product.active.is_(True))
     return db.execute(stmt).scalars().first()
+
+
+def grant_product_quota(
+    db: Session,
+    *,
+    user_id: int,
+    product: Product,
+    source: str = "purchase",
+) -> Dict[str, int]:
+    """
+    根据 product 配置为用户发放配额。
+    - 套餐（bazi_quota / liuyao_quota）→ 分别计入 chat / liuyao_chat
+    - 旧单类型商品（仅 quota_amount）→ 计入 chat
+    返回本次发放的明细，例: {"bazi": 10, "liuyao": 3}
+    """
+    granted: Dict[str, int] = {}
+
+    if product.bazi_quota and product.bazi_quota > 0:
+        QuotaService.add_quota(db, user_id, product.bazi_quota, "chat", source)
+        granted["bazi"] = product.bazi_quota
+
+    if product.liuyao_quota and product.liuyao_quota > 0:
+        QuotaService.add_quota(db, user_id, product.liuyao_quota, "liuyao_chat", source)
+        granted["liuyao"] = product.liuyao_quota
+
+    # 兼容旧商品：未配置 bazi/liuyao 但 quota_amount > 0 时，按 chat 发放
+    if not granted and product.quota_amount and product.quota_amount > 0:
+        QuotaService.add_quota(db, user_id, product.quota_amount, "chat", source)
+        granted["bazi"] = product.quota_amount
+
+    return granted

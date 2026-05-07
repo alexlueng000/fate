@@ -64,7 +64,26 @@ class Product(Base):
     quota_amount: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
+        default=0,
         comment="提供的提问次数",
+    )
+
+    # 八字解读次数（套餐拆分后使用，单独从 quota_type='chat' 扣减）
+    bazi_quota: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="八字次数（quota_type=chat）",
+    )
+
+    # 六爻问卦次数（quota_type='liuyao_chat'）
+    liuyao_quota: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="六爻次数（quota_type=liuyao_chat）",
     )
 
     # 描述

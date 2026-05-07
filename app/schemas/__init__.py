@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -98,3 +98,32 @@ class EntitlementOut(BaseModel):
     granted_at: datetime
 
     model_config = dict(from_attributes=True)
+
+
+# =========================
+# Simulate Payment (开发/演示用)
+# =========================
+class SimulatePaymentIn(BaseModel):
+    product_code: str = Field(..., description="商品编码，例如 basic_combo / premium_combo")
+
+
+class QuotaSnapshot(BaseModel):
+    """单条 quota 快照，用于购买后同步前端显示。"""
+    type: str
+    total: int
+    used: int
+    remaining: int
+    is_unlimited: bool
+
+
+class SimulatePaymentOut(BaseModel):
+    order_id: int
+    product_code: str
+    granted: Dict[str, int] = Field(
+        default_factory=dict,
+        description="本次发放明细，例如 {\"bazi\": 10, \"liuyao\": 3}",
+    )
+    quotas: List[QuotaSnapshot] = Field(
+        default_factory=list,
+        description="发放后用户全部配额快照",
+    )
