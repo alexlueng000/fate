@@ -210,22 +210,12 @@ def get_conversation(
     else:
         if conv.liuyao_hexagram_id:
             from app.models.liuyao import LiuyaoHexagram
+            from app.routers.liuyao import HexagramDetailResponse
             hx = db.get(LiuyaoHexagram, conv.liuyao_hexagram_id)
             if hx:
-                hexagram_data = {
-                    "id": hx.id,
-                    "hexagram_id": hx.hexagram_id,
-                    "question": hx.question,
-                    "main_gua": hx.main_gua,
-                    "change_gua": hx.change_gua,
-                    "timestamp": hx.timestamp.isoformat() if hx.timestamp else None,
-                    "location": hx.location,
-                    "dong_yao": hx.dong_yao,
-                    "gua_gong": getattr(hx, "gua_gong", None),
-                    "shensha": getattr(hx, "shensha", None),
-                    "gua_shen": getattr(hx, "gua_shen", None),
-                    "lunar_date": getattr(hx, "lunar_date", None),
-                }
+                # 复用 HexagramDetailResponse 序列化，保证 lines/change_lines/ganzhi 等
+                # 完整字段返回，前端 LiuyaoPage 的 setResult 可直接使用
+                hexagram_data = HexagramDetailResponse.model_validate(hx).model_dump(mode="json")
 
     return ConversationDetailResp(
         id=conv.id,
