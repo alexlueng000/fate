@@ -245,7 +245,9 @@ async def websocket_chat(websocket: WebSocket):
             set_conv(cid, {
                 "pinned": composed,
                 "history": [],
-                "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX)
+                "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
+                "kind": "bazi",
+                "paipan": paipan,  # 保存八字信息，用于后续对话
             })
 
             opening_user_msg = (
@@ -332,6 +334,25 @@ async def websocket_chat(websocket: WebSocket):
             if kb_passages:
                 kb_block = "\n\n".join(kb_passages)
                 composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+
+            # 注入本命八字锚点：避免对话中出现多个八字时混淆
+            paipan = conv.get("paipan") or {}
+            if paipan and paipan.get("four_pillars"):
+                fp = paipan["four_pillars"]
+                bazi_anchor = (
+                    f"\n\n【本命盘锚点 - 始终以此为准】\n"
+                    f"用户本人性别：{paipan.get('gender', '')}\n"
+                    f"用户本人八字：年柱 {''.join(fp.get('year', []))}，"
+                    f"月柱 {''.join(fp.get('month', []))}，"
+                    f"日柱 {''.join(fp.get('day', []))}，"
+                    f"时柱 {''.join(fp.get('hour', []))}\n"
+                    f"重要规则：\n"
+                    f"1. 上述八字为用户的本命盘，是一切分析的基准\n"
+                    f"2. 若用户在对话中提到他人八字（如配偶、合盘对象），仅作参考对比\n"
+                    f"3. 除非用户明确指定分析对象，否则默认所有问题都是关于用户本命盘\n"
+                    f"4. 不要将其他人的八字信息覆盖或替换用户的本命盘"
+                )
+                composed = composed + bazi_anchor
 
             recentN = 10
             messages = [{"role": "system", "content": composed}]
