@@ -374,16 +374,22 @@ class LiuyaoPaipan:
         return yang_patterns[gua_num][position]
 
     def _calc_change_lines(self, lines: List[Dict], dong_yao: int) -> List[Dict]:
-        """计算变卦的爻"""
+        """计算变卦的爻
+
+        注意：只有 is_dong=True 的爻才会变化（阳变阴，阴变阳）
+        其他爻保持不变
+        """
         change_lines = []
         for i, line in enumerate(lines):
-            if (i + 1) == dong_yao:
+            # 检查这个爻是否真的是动爻
+            if line.get("is_dong", False):
                 # 动爻变化：阳变阴，阴变阳
                 change_lines.append({
                     "is_yang": not line["is_yang"],
                     "is_dong": False,
                 })
             else:
+                # 非动爻保持不变
                 change_lines.append({
                     "is_yang": line["is_yang"],
                     "is_dong": False,

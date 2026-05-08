@@ -162,6 +162,8 @@ def start_chat(
                 "kb_index_dir": os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
                 "user_id": user_id,
                 "db_conv_id": db_conv_id,
+                "kind": "bazi",
+                "paipan": paipan,
             })
 
         opening_user_msg = (
@@ -358,6 +360,7 @@ def init_chat(
         "user_id": user_id,
         "db_conv_id": db_conv_id,
         "paipan": paipan or {},
+        "kind": "bazi",
     })
 
     logger.info("init_chat_created", cid=cid, user_id=user_id, profile_id=profile_id)
@@ -430,6 +433,7 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
                         "user_id": user_id,
                         "db_conv_id": db_conv_id_int,
                         "paipan": paipan,
+                        "kind": "bazi",
                     })
                     conv = get_conv(conversation_id)
                     logger.info("conversation_recovered", conversation_id=conversation_id, user_id=user_id, msg_count=len(history))
@@ -460,6 +464,25 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
     # 每次对话都从 DB 重新加载最新 system prompt，确保管理员改动立即生效
     base_prompt = utils.load_system_prompt_from_db()
     composed = utils.build_full_system_prompt(base_prompt, kb_passages)
+
+    # 注入本命八字锚点：避免对话中出现多个八字时混淆（如合盘、家人八字等）
+    paipan = conv.get("paipan") or {}
+    if paipan and paipan.get("four_pillars"):
+        fp = paipan["four_pillars"]
+        bazi_anchor = (
+            f"\n\n【本命盘锚点 - 始终以此为准】\n"
+            f"用户本人性别：{paipan.get('gender', '')}\n"
+            f"用户本人八字：年柱 {''.join(fp.get('year', []))}，"
+            f"月柱 {''.join(fp.get('month', []))}，"
+            f"日柱 {''.join(fp.get('day', []))}，"
+            f"时柱 {''.join(fp.get('hour', []))}\n"
+            f"重要规则：\n"
+            f"1. 上述八字为用户的本命盘，是一切分析的基准\n"
+            f"2. 若用户在对话中提到他人八字（如配偶、合盘对象、家人），仅作参考对比\n"
+            f"3. 除非用户明确指定分析对象，否则默认所有问题都是关于用户本命盘\n"
+            f"4. 不要将其他人的八字信息覆盖或替换用户的本命盘"
+        )
+        composed = composed + bazi_anchor
 
     recentN = 10
     history = conv.get("history", [])
@@ -618,6 +641,25 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     composed = utils.build_full_system_prompt(
         utils.load_system_prompt_from_db(), kb_passages
     )
+
+    # 注入本命八字锚点：避免对话中出现多个八字时混淆
+    paipan = conv.get("paipan") or {}
+    if paipan and paipan.get("four_pillars"):
+        fp = paipan["four_pillars"]
+        bazi_anchor = (
+            f"\n\n【本命盘锚点 - 始终以此为准】\n"
+            f"用户本人性别：{paipan.get('gender', '')}\n"
+            f"用户本人八字：年柱 {''.join(fp.get('year', []))}，"
+            f"月柱 {''.join(fp.get('month', []))}，"
+            f"日柱 {''.join(fp.get('day', []))}，"
+            f"时柱 {''.join(fp.get('hour', []))}\n"
+            f"重要规则：\n"
+            f"1. 上述八字为用户的本命盘，是一切分析的基准\n"
+            f"2. 若用户在对话中提到他人八字（如配偶、合盘对象、家人），仅作参考对比\n"
+            f"3. 除非用户明确指定分析对象，否则默认所有问题都是关于用户本命盘\n"
+            f"4. 不要将其他人的八字信息覆盖或替换用户的本命盘"
+        )
+        composed = composed + bazi_anchor
 
     recentN = 10
     trimmed_history = history[-recentN:]
