@@ -272,7 +272,7 @@ def main():
         print("请先设置环境变量 DEEPSEEK_API_KEY")
         return
 
-    conversation_id = f"conv_{uuid.uuid4().hex[:8]}"
+    conversation_id = f"bazi_conv_{uuid.uuid4().hex[:8]}"
     history: List[Dict[str, str]] = []
 
     longitude = geocode_city("广东阳春").get("lng")

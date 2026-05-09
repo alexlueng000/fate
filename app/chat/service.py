@@ -147,13 +147,13 @@ def start_chat(
                         profile_id=profile_id,
                         bazi_chart_snapshot=paipan,
                     )
-                    cid = f"conv_{db_conv_id}"  # 使用数据库ID
+                    cid = f"bazi_conv_{db_conv_id}"  # 使用数据库ID，添加类型前缀
                     logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid, profile_id=profile_id)
                 except Exception as e:
                     logger.error("db_conversation_create_failed", error=str(e), user_id=user_id)
-                    cid = f"conv_{uuid.uuid4().hex[:8]}"
+                    cid = f"bazi_conv_{uuid.uuid4().hex[:8]}"
             else:
-                cid = f"conv_{uuid.uuid4().hex[:8]}"
+                cid = f"bazi_conv_{uuid.uuid4().hex[:8]}"
                 logger.info("anonymous_conversation", cid=cid)
 
             set_conv(cid, {
@@ -347,11 +347,11 @@ def init_chat(
                 profile_id=profile_id,
                 bazi_chart_snapshot=paipan,
             )
-            cid = f"conv_{db_conv_id}"
+            cid = f"bazi_conv_{db_conv_id}"
         except Exception:
-            cid = f"conv_{uuid.uuid4().hex[:8]}"
+            cid = f"bazi_conv_{uuid.uuid4().hex[:8]}"
     else:
-        cid = f"conv_{uuid.uuid4().hex[:8]}"
+        cid = f"bazi_conv_{uuid.uuid4().hex[:8]}"
 
     set_conv(cid, {
         "pinned": composed,

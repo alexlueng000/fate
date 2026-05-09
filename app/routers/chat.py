@@ -209,7 +209,7 @@ async def websocket_chat(websocket: WebSocket):
             import uuid
 
             # 生成 conversation_id
-            cid = f"conv_{uuid.uuid4().hex[:8]}"
+            cid = f"bazi_conv_{uuid.uuid4().hex[:8]}"
 
             # 发送 meta 事件
             await websocket.send_json({"meta": {"conversation_id": cid}})

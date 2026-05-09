@@ -146,7 +146,7 @@ def start_liuyao_chat(
     opening_user_msg = build_opening_user_message(hexagram)
 
     db_conv_id = _create_db_conversation(db, user_id, hexagram)
-    cid = f"conv_{db_conv_id}"
+    cid = f"liuyao_conv_{db_conv_id}"
 
     set_conv(cid, {
         "pinned": system_prompt,
