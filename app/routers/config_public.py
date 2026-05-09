@@ -57,6 +57,32 @@ async def get_quick_buttons(db: Session = Depends(get_db), r=Depends(get_redis))
 
     return data
 
+@router.get("/liuyao_quick_buttons")
+async def get_liuyao_quick_buttons(db: Session = Depends(get_db), r=Depends(get_redis)):
+    cache_key = f"{CACHE_PREFIX}liuyao_quick_buttons:{CACHE_VER}"
+    if r:
+        val = await r.get(cache_key)
+        if val:
+            try:
+                data = json.loads(val)
+                return data
+            except Exception:
+                pass
+
+    cfg = fetch_current(db, "liuyao_quick_buttons")
+    if not cfg:
+        return []
+
+    items = cfg.get("items", [])
+    items = [it for it in items if it.get("active") is True]
+    items.sort(key=lambda x: x.get("order", 0))
+    data = [{"label": it.get("label", ""), "prompt": it.get("prompt", "")} for it in items]
+
+    if r:
+        await r.set(cache_key, json.dumps(data, ensure_ascii=False), ex=3600)
+
+    return data
+
 @router.get("/system_prompt")
 async def get_system_prompt(db: Session = Depends(get_db), r=Depends(get_redis)):
     cache_key = f"{CACHE_PREFIX}system_prompt:{CACHE_VER}"

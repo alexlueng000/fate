@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Iterator, List, Literal, Optional
+from typing import Iterator, List, Optional
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -31,15 +31,11 @@ from app.models.chat import Conversation, Message
 from app.models.liuyao import LiuyaoHexagram
 
 from .prompts import (
-    QUICK_LABELS,
-    QUICK_PROMPTS,
     build_opening_user_message,
     build_system_prompt,
 )
 
 logger = get_logger("liuyao.chat")
-
-KIND_TYPE = Literal["character", "timing"]
 
 
 def _create_db_conversation(
@@ -397,16 +393,13 @@ def send_liuyao_chat(
 
 def quick_liuyao_chat(
     conversation_id: str,
-    kind: KIND_TYPE,
+    label: str,
+    prompt: str,
     request: Request,
     user_id: int,
     db: Session,
 ):
-    """快捷按钮（人物画像 / 应期）。"""
-    if kind not in QUICK_PROMPTS:
-        raise ValueError(f"不支持的快捷类型：{kind}")
-    prompt = QUICK_PROMPTS[kind]
-    label = QUICK_LABELS[kind]
+    """快捷按钮：管理后台配置的 label + prompt 直接转发到流式对话。"""
     return _send_streaming_message(
         conversation_id=conversation_id,
         user_message=prompt,
@@ -414,7 +407,7 @@ def quick_liuyao_chat(
         request=request,
         user_id=user_id,
         db=db,
-        caller_tag=f"liuyao_chat_quick_{kind}",
+        caller_tag="liuyao_chat_quick",
     )
 
 

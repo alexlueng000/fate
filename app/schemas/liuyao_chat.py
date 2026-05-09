@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,8 @@ class LiuyaoChatSendReq(BaseModel):
 
 class LiuyaoChatQuickReq(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=64)
-    kind: Literal["character", "timing"]
+    label: str = Field(..., min_length=1, max_length=64)
+    prompt: str = Field(..., min_length=1, max_length=4000)
 
 
 class LiuyaoChatRegenerateReq(BaseModel):

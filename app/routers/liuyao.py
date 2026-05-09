@@ -495,7 +495,8 @@ def liuyao_chat_quick(
     try:
         result = quick_liuyao_chat(
             conversation_id=req.conversation_id,
-            kind=req.kind,
+            label=req.label,
+            prompt=req.prompt,
             request=request,
             user_id=current_user.id,
             db=db,

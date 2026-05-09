@@ -31,7 +31,7 @@ def admin_required():
 # -----------------------------
 # 配置
 # -----------------------------
-ALLOWED_KEYS = {"system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt"}
+ALLOWED_KEYS = {"system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt", "liuyao_quick_buttons"}
 CACHE_PREFIX = "cfg:"  # Redis 前缀，例如 cfg:system_prompt:v1
 CACHE_VER = "v1"
 
@@ -44,7 +44,7 @@ router = APIRouter(
 # ========== Pydantic Schemas ==========
 
 class ConfigSaveReq(BaseModel):
-    key: Literal["system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt"]
+    key: Literal["system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt", "liuyao_quick_buttons"]
     value_json: dict = Field(..., description="完整配置 JSON")
     comment: Optional[str] = Field(None, max_length=255)
 
@@ -55,10 +55,10 @@ class ConfigSaveReq(BaseModel):
         if key in ("system_prompt", "report_system_prompt", "liuyao_system_prompt"):
             if not isinstance(v.get("content"), str) or not v["content"].strip():
                 raise ValueError(f"{key}.value_json.content 必须为非空字符串")
-        elif key == "quick_buttons":
+        elif key in ("quick_buttons", "liuyao_quick_buttons"):
             items = v.get("items", [])
             if not isinstance(items, list):
-                raise ValueError("quick_buttons.value_json.items 必须为数组")
+                raise ValueError(f"{key}.value_json.items 必须为数组")
             for i, it in enumerate(items):
                 if not isinstance(it.get("label"), str) or not it["label"].strip():
                     raise ValueError(f"items[{i}].label 必须为非空字符串")
@@ -72,7 +72,7 @@ class ConfigSaveReq(BaseModel):
 
 
 class ConfigRollbackReq(BaseModel):
-    key: Literal["system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt"]
+    key: Literal["system_prompt", "quick_buttons", "report_system_prompt", "liuyao_system_prompt", "liuyao_quick_buttons"]
     version: int = Field(..., ge=1, description="目标历史版本号")
     comment: Optional[str] = Field(None, max_length=255)
 
