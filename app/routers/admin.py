@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..db import get_db
 from ..deps import get_admin_user
+from ..chat.utils import clear_prompt_cache
 
 # 可选：若你项目里已有 get_redis，这里自动引用；没有也可运行（失效缓存会跳过）
 try:
@@ -71,11 +72,13 @@ class ConfigRollbackReq(BaseModel):
 
 async def invalidate_cache(r, key: str):
     if not r:
+        clear_prompt_cache(key)
         return
     try:
         await r.delete(f"{CACHE_PREFIX}{key}:{CACHE_VER}")
     except Exception:
         pass
+    clear_prompt_cache(key)
 
 def fetch_current(db: Session, key: str) -> Optional[dict]:
     row = db.execute(

@@ -257,10 +257,13 @@ def load_liuyao_system_prompt_from_db(ttl: int = _PROMPT_CACHE_TTL) -> str:
         return content
 
 
-
-    """Clear the system prompt cache."""
+def clear_prompt_cache(key: Optional[str] = None) -> None:
+    """Clear one prompt cache entry, or all prompt cache entries."""
     with _prompt_cache_lock:
-        _prompt_cache.clear()
+        if key:
+            _prompt_cache.pop(key, None)
+        else:
+            _prompt_cache.clear()
 
 
 # ===================== Timing Utilities =====================
