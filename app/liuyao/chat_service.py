@@ -38,6 +38,16 @@ from .prompts import (
 logger = get_logger("liuyao.chat")
 
 
+def _parse_db_conversation_id(conversation_id: str) -> Optional[int]:
+    """Extract the numeric DB conversation id from current and legacy ids."""
+    raw_id = conversation_id
+    for prefix in ("liuyao_conv_", "conv_"):
+        if raw_id.startswith(prefix):
+            raw_id = raw_id.removeprefix(prefix)
+            break
+    return int(raw_id) if raw_id.isdigit() else None
+
+
 def _create_db_conversation(
     db: Session, user_id: int, hexagram: LiuyaoHexagram
 ) -> int:
@@ -245,15 +255,14 @@ def _send_streaming_message(
 
     display_user_message: 写入 history / DB 的 user 消息内容（默认与 user_message 相同）。
                          快捷按钮场景下，UI 显示的是"人物画像分析"等短标签，
-                         但实际让 AI 看到的是完整 prompt，因此 prompt 与 history 内容一致。
+                         但实际让 AI 看到的是完整 prompt。
     """
     conv = get_conv(conversation_id)
 
     # 服务重启后 in-memory 丢失，尝试从 DB 恢复
     if not conv:
         try:
-            raw_id = conversation_id.removeprefix("conv_")
-            db_conv_id_int = int(raw_id) if raw_id.isdigit() else None
+            db_conv_id_int = _parse_db_conversation_id(conversation_id)
             if db_conv_id_int:
                 from app.models.chat import Conversation as ConvModel, Message as MsgModel
                 db_conv = db.get(ConvModel, db_conv_id_int)

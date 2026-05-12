@@ -64,6 +64,10 @@ class ConversationDetailResp(BaseModel):
     hexagram: Optional[dict] = None      # 六爻才有
 
 
+class DeleteConversationsResp(BaseModel):
+    deleted: int
+
+
 # ===== 工具函数 =====
 
 def _four_pillars_summary(bazi_chart_snapshot: Optional[dict]) -> Optional[str]:
@@ -91,6 +95,66 @@ def _preview(text: Optional[str], limit: int = 60) -> Optional[str]:
     return text[:limit] + "…" if len(text) > limit else text
 
 
+def _safe_user_message(text: Optional[str]) -> Optional[str]:
+    """Return a user-facing version of persisted user content."""
+    if not text:
+        return None
+
+    content = text.strip()
+    if not content:
+        return None
+
+    if content.startswith("我的命盘信息如下"):
+        return None
+
+    leak_markers = (
+        "system prompt",
+        "系统提示",
+        "系统prompt",
+        "需引导用户",
+        "结合原局",
+        "用子平和盲派深度分析",
+        "请基于当前命盘",
+        "本命盘锚点",
+        "重要规则：",
+    )
+    prompt_like = any(marker in content for marker in leak_markers)
+    if prompt_like:
+        quick_prompt_rules = [
+            (("正缘人物画像",), "正缘人物画像分析"),
+            (("人物画像",), "人物画像分析"),
+            (("性格", "优势"), "性格特征分析"),
+            (("事业",), "事业建议分析"),
+            (("财运",), "财运分析"),
+            (("健康",), "健康分析"),
+            (("正缘应期",), "正缘应期分析"),
+            (("流年应期概率最高",), "正缘应期分析"),
+        ]
+        for keywords, label in quick_prompt_rules:
+            if all(keyword in content for keyword in keywords):
+                return label
+
+    if any(marker in content for marker in leak_markers):
+        return "快捷分析"
+
+    return content
+
+
+def _conversation_type_query(
+    user_id: int,
+    type: Literal["bazi", "liuyao", "all"],
+):
+    query = select(Conversation).where(Conversation.user_id == user_id)
+    if type == "bazi":
+        return query.where(
+            Conversation.profile_id.is_not(None),
+            Conversation.liuyao_hexagram_id.is_(None),
+        )
+    if type == "liuyao":
+        return query.where(Conversation.liuyao_hexagram_id.is_not(None))
+    return query
+
+
 # ===== 路由 =====
 
 @router.get("", response_model=ConversationListResp)
@@ -102,14 +166,7 @@ def list_conversations(
     user_id: int = Depends(get_current_user_or_401),
 ):
     # 按类型过滤
-    base_q = select(Conversation).where(Conversation.user_id == user_id)
-    if type == "bazi":
-        base_q = base_q.where(
-            Conversation.profile_id.is_not(None),
-            Conversation.liuyao_hexagram_id.is_(None),
-        )
-    else:
-        base_q = base_q.where(Conversation.liuyao_hexagram_id.is_not(None))
+    base_q = _conversation_type_query(user_id, type)
 
     total = db.scalar(
         select(func.count()).select_from(base_q.subquery())
@@ -123,12 +180,16 @@ def list_conversations(
 
     items: List[ConversationListItem] = []
     for conv in rows:
-        # 取最后一条 user / assistant 消息预览
-        last_user = db.scalar(
+        # 取最后一条可展示的 user / assistant 消息预览。
+        user_messages = db.scalars(
             select(Message.content)
             .where(Message.conversation_id == conv.id, Message.role == "user")
             .order_by(Message.id.desc())
-            .limit(1)
+            .limit(10)
+        ).all()
+        last_user = next(
+            (safe for text in user_messages if (safe := _safe_user_message(text))),
+            None,
         )
         last_asst = db.scalar(
             select(Message.content)
@@ -167,6 +228,20 @@ def list_conversations(
     )
 
 
+@router.delete("", response_model=DeleteConversationsResp)
+def delete_conversations(
+    type: Literal["bazi", "liuyao", "all"] = Query(..., description="要清空的会话类型"),
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_or_401),
+):
+    rows = db.scalars(_conversation_type_query(user_id, type)).all()
+    deleted = len(rows)
+    for conv in rows:
+        db.delete(conv)
+    db.commit()
+    return DeleteConversationsResp(deleted=deleted)
+
+
 @router.get("/{conversation_id}", response_model=ConversationDetailResp)
 def get_conversation(
     conversation_id: int,
@@ -188,10 +263,20 @@ def get_conversation(
         .order_by(Message.id.asc())
     ).all()
 
-    message_items = [
-        MessageItem(id=m.id, role=m.role, content=m.content, created_at=m.created_at)
-        for m in msgs
-    ]
+    message_items: List[MessageItem] = []
+    for m in msgs:
+        content = m.content
+        if m.role == "user":
+            safe_content = _safe_user_message(m.content)
+            if not safe_content:
+                continue
+            content = safe_content
+        elif m.role == "system":
+            continue
+
+        message_items.append(
+            MessageItem(id=m.id, role=m.role, content=content, created_at=m.created_at)
+        )
 
     profile_data: Optional[dict] = None
     profile_changed = False

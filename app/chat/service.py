@@ -33,6 +33,16 @@ DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 # ===================== 数据库持久化辅助函数 =====================
 
+def _parse_db_conversation_id(conversation_id: str) -> Optional[int]:
+    """Extract the numeric DB conversation id from current and legacy ids."""
+    raw_id = conversation_id
+    for prefix in ("bazi_conv_", "conv_"):
+        if raw_id.startswith(prefix):
+            raw_id = raw_id.removeprefix(prefix)
+            break
+    return int(raw_id) if raw_id.isdigit() else None
+
+
 def _create_db_conversation(
     db: Session,
     user_id: int,
@@ -367,7 +377,14 @@ def init_chat(
     return cid
 
 
-def send_chat(conversation_id: str, message: str, request: Request, user_id: Optional[int] = None, db: Optional[Session] = None):
+def send_chat(
+    conversation_id: str,
+    message: str,
+    request: Request,
+    user_id: Optional[int] = None,
+    db: Optional[Session] = None,
+    display_message: Optional[str] = None,
+):
     """
     Send a message in an existing conversation.
 
@@ -391,13 +408,16 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
         logger.info("conversation_not_found_attempting_recovery", conversation_id=conversation_id, user_id=user_id)
         try:
             from app.models.chat import Conversation as ConvModel, Message as MsgModel
-            # conversation_id 格式：conv_{db_id}
-            raw_id = conversation_id.removeprefix("conv_")
-            db_conv_id_int = int(raw_id) if raw_id.isdigit() else None
+            db_conv_id_int = _parse_db_conversation_id(conversation_id)
 
             if db_conv_id_int:
                 db_conv = db.get(ConvModel, db_conv_id_int)
-                if db_conv and db_conv.user_id == user_id:
+                if (
+                    db_conv
+                    and db_conv.user_id == user_id
+                    and db_conv.profile_id is not None
+                    and db_conv.liuyao_hexagram_id is None
+                ):
                     # 用会话创建时的命盘快照（而非当前 live profile）
                     snapshot = db_conv.bazi_chart_snapshot or {}
                     paipan = snapshot.get("mingpan", snapshot) if isinstance(snapshot, dict) else {}
@@ -508,6 +528,7 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
     logger.debug("chat_send_prompt", conversation_id=conversation_id, message=message)
 
     t0 = utils.now_ms()
+    persisted_user_message = (display_message or message).strip() or message
 
     # 流式
     if should_stream(request):
@@ -535,7 +556,7 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
                 yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
             finally:
-                append_history(conversation_id, "user", message)
+                append_history(conversation_id, "user", persisted_user_message)
                 append_history(conversation_id, "assistant", final)
 
                 # 数据库持久化（仅登录用户）
@@ -545,7 +566,7 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
                         from app.db import SessionLocal
                         with SessionLocal() as new_db:
                             latency = int((utils.now_ms() - t0))
-                            _save_db_message(new_db, db_conv_id, user_id, "user", message)
+                            _save_db_message(new_db, db_conv_id, user_id, "user", persisted_user_message)
                             assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
                             logger.info("messages_persisted", conversation_id=conversation_id, assistant_msg_id=assistant_msg_id)
                             # 发送包含 message_id 的元数据
@@ -577,14 +598,14 @@ def send_chat(conversation_id: str, message: str, request: Request, user_id: Opt
         reply = normalize_markdown(reply)
     except Exception:
         pass
-    append_history(conversation_id, "user", message)
+    append_history(conversation_id, "user", persisted_user_message)
     append_history(conversation_id, "assistant", reply)
 
     # 数据库持久化（仅登录用户）
     if db_conv_id and user_id and db:
         try:
             latency = int((utils.now_ms() - t0))
-            _save_db_message(db, db_conv_id, user_id, "user", message)
+            _save_db_message(db, db_conv_id, user_id, "user", persisted_user_message)
             _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
         except Exception as e:
             logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)

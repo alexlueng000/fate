@@ -71,6 +71,7 @@ class ChatStartResp(BaseModel):
 class ChatSendReq(BaseModel):
     conversation_id: str = Field(..., description="由 /chat/start 返回")
     message: str
+    display_message: Optional[str] = Field(None, description="展示/入库用的用户消息，避免保存内部快捷 prompt")
 
 class ChatSendResp(BaseModel):
     conversation_id: str

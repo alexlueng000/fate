@@ -111,7 +111,14 @@ def chat_send(
             raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
         logger.info("quota_consumed", user_id=user_id, remaining=remaining, endpoint="chat_send")
     try:
-        result = send_chat(req.conversation_id, req.message, request, user_id=user_id, db=db)
+        result = send_chat(
+            req.conversation_id,
+            req.message,
+            request,
+            user_id=user_id,
+            db=db,
+            display_message=req.display_message,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
 
