@@ -4,12 +4,13 @@ from __future__ import annotations
 import json
 from typing import Optional, Literal, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, ValidationError, validator
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..db import get_db
+from ..deps import get_admin_user
 
 # 可选：若你项目里已有 get_redis，这里自动引用；没有也可运行（失效缓存会跳过）
 try:
@@ -17,16 +18,6 @@ try:
 except Exception:
     async def get_redis():
         return None  # 占位，保证本文件可用
-
-# -----------------------------
-# 权限：请替换为你真实的管理员校验
-# -----------------------------
-def admin_required():
-    # TODO: 替换为真实鉴权，例如读取 request.user.is_admin
-    is_admin = True
-    if not is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
-    return True
 
 # -----------------------------
 # 配置
@@ -38,7 +29,7 @@ CACHE_VER = "v1"
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(admin_required)]
+    dependencies=[Depends(get_admin_user)]
 )
 
 # ========== Pydantic Schemas ==========

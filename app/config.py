@@ -2,7 +2,7 @@
 import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import model_validator
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # App
     # -----------------------------
     app_name: str = "Bazi AI Backend"
-    debug: bool = True
+    debug: bool = False
     # 逗号分隔或 "*"；main.py 可用 settings.cors_origins_list()
     cors_allow_origins: str = "*"
 
@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Database (MySQL)
     # -----------------------------
     # 默认指向本地开发数据库（安全默认），生产环境必须通过 .env 覆盖
-    database_url: str = "mysql+pymysql://fate_app:Turkey414@127.0.0.1:3306/fate_dev"
+    database_url: str = "mysql+pymysql://fate_app:password@127.0.0.1:3306/fate_dev"
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_pool_recycle: int = 3600    # 秒；1小时回收
@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     jwt_alg: str = "HS256"
     jwt_expire_minutes: int = 7 * 24 * 60
     jwt_clock_skew_leeway: int = 30  # 容忍客户端时钟偏差（秒）
+
+    # -----------------------------
+    # DeepSeek
+    # -----------------------------
+    deepseek_api_key: Optional[str] = None
+    deepseek_api_url: str = "https://api.deepseek.com/chat/completions"
+    deepseek_model: str = "deepseek-chat"
+    deepseek_max_concurrent: int = 5
+    deepseek_acquire_timeout: int = 20
+    deepseek_retry_times: int = 3
+    deepseek_retry_base_delay: float = 1.5
+    deepseek_timeout: int = 300
 
     # -----------------------------
     # Business
@@ -83,10 +95,28 @@ class Settings(BaseSettings):
     # -----------------------------
     smtp_host: str = "smtp.qq.com"
     smtp_port: int = 587
-    smtp_username: Optional[str] = "494762262@qq.com"
-    smtp_password: Optional[str] = "nvuvhqmfoajnbggb"
-    smtp_sender: str = "494762262@qq.com"
+    smtp_username: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_sender: str = "noreply@example.com"
     smtp_use_tls: bool = True
+
+    @model_validator(mode="after")
+    def validate_production_settings(self):
+        """Fail fast when production starts without required secrets."""
+        if not self.is_production():
+            return self
+
+        missing = []
+        if not self.database_url or "password@127.0.0.1" in self.database_url:
+            missing.append("DATABASE_URL")
+        if not self.jwt_secret or self.jwt_secret in {"change-me", "please-change-me", "change-me-in-production"}:
+            missing.append("JWT_SECRET")
+        if not self.deepseek_api_key:
+            missing.append("DEEPSEEK_API_KEY")
+
+        if missing:
+            raise ValueError(f"Missing or unsafe production settings: {', '.join(missing)}")
+        return self
 
     # -----------------------------
     # Helpers
