@@ -125,3 +125,27 @@ async def get_system_prompt(db: Session = Depends(get_db), r=Depends(get_redis))
         await r.set(cache_key, json.dumps(cfg, ensure_ascii=False), ex=3600)
     return cfg
 
+@router.get("/bazi_intro")
+async def get_bazi_intro(db: Session = Depends(get_db), r=Depends(get_redis)):
+    cache_key = f"{CACHE_PREFIX}bazi_intro:{CACHE_VER}"
+    if r:
+        val = await r.get(cache_key)
+        if val:
+            try:
+                data = json.loads(val)
+                return data
+            except Exception:
+                pass
+
+    cfg = fetch_current(db, "bazi_intro")
+    if not cfg:
+        raise HTTPException(404, "bazi_intro not configured")
+
+    content = cfg.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(404, "bazi_intro not configured")
+
+    if r:
+        await r.set(cache_key, json.dumps(cfg, ensure_ascii=False), ex=3600)
+    return cfg
+
