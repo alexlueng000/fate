@@ -56,6 +56,14 @@ class ApiCallLog(Base):
         Integer, nullable=False, default=0, comment="输出 token",
     )
 
+    # 缓存统计（DeepSeek Context Caching）
+    prompt_cache_hit_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="缓存命中 token (0.1元/百万)",
+    )
+    prompt_cache_miss_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="缓存未命中 token (1元/百万)",
+    )
+
     # 耗时（秒）
     latency: Mapped[float] = mapped_column(
         Float, nullable=False, default=0.0, comment="请求耗时(秒)",

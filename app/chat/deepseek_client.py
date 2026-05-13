@@ -143,6 +143,8 @@ def _log_api_call(
     success: bool,
     attempt: int,
     error: Optional[str] = None,
+    prompt_cache_hit_tokens: int = 0,
+    prompt_cache_miss_tokens: int = 0,
 ):
     """Write API usage logs asynchronously without blocking user responses."""
     caller = _get_caller()
@@ -160,6 +162,8 @@ def _log_api_call(
                     stream=stream,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+                    prompt_cache_miss_tokens=prompt_cache_miss_tokens,
                     latency=round(latency, 3),
                     success=success,
                     attempt=attempt,
@@ -211,6 +215,8 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                     stream=False,
                     prompt_tokens=usage.get("prompt_tokens", 0),
                     completion_tokens=usage.get("completion_tokens", 0),
+                    prompt_cache_hit_tokens=usage.get("prompt_cache_hit_tokens", 0),
+                    prompt_cache_miss_tokens=usage.get("prompt_cache_miss_tokens", 0),
                     latency=latency,
                     success=True,
                     attempt=attempt,
@@ -264,6 +270,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
             success = False
             prompt_tokens = 0
             completion_tokens = 0
+            prompt_cache_hit_tokens = 0
+            prompt_cache_miss_tokens = 0
             error: Optional[str] = None
             response: Optional[requests.Response] = None
 
@@ -292,6 +300,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                             if usage:
                                 prompt_tokens = usage.get("prompt_tokens", 0)
                                 completion_tokens = usage.get("completion_tokens", 0)
+                                prompt_cache_hit_tokens = usage.get("prompt_cache_hit_tokens", 0)
+                                prompt_cache_miss_tokens = usage.get("prompt_cache_miss_tokens", 0)
 
                             choices = obj.get("choices") or []
                             first_choice = choices[0] if choices else None
@@ -320,6 +330,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                     stream=True,
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
+                    prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+                    prompt_cache_miss_tokens=prompt_cache_miss_tokens,
                     latency=round(time.perf_counter() - t0, 3),
                     success=success,
                     attempt=attempt,
