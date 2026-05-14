@@ -25,6 +25,7 @@ class EmailService:
         self.password = settings.smtp_password
         self.sender = settings.smtp_sender
         self.use_tls = settings.smtp_use_tls
+        self.start_tls = settings.smtp_start_tls
 
     async def send_email(
         self,
@@ -65,7 +66,8 @@ class EmailService:
                 port=self.port,
                 username=self.username,
                 password=self.password,
-                start_tls=self.use_tls,
+                use_tls=self.use_tls,
+                start_tls=self.start_tls,
             )
 
             logger.info(f"邮件发送成功: to={to}, subject={subject}")

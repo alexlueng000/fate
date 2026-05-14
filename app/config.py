@@ -99,6 +99,7 @@ class Settings(BaseSettings):
     smtp_password: Optional[str] = None
     smtp_sender: str = "noreply@example.com"
     smtp_use_tls: bool = True
+    smtp_start_tls: bool = False
 
     @model_validator(mode="after")
     def validate_production_settings(self):
