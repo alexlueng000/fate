@@ -75,6 +75,11 @@ python-docx>=1.1.0
 redis>=5.0.0
 
 # -----------------------------
+# SMS Service (Tencent Cloud)
+# -----------------------------
+tencentcloud-sdk-python>=3.0.1000
+
+# -----------------------------
 # Note: PyTorch is installed separately in Dockerfile
 # to use CPU-only version and reduce image size
 # torch>=2.0.0 --index-url https://download.pytorch.org/whl/cpu

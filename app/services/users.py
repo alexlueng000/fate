@@ -88,6 +88,65 @@ def get_by_phone(db: Session, phone: Optional[str]) -> Optional[User]:
 
 # ========== 幂等创建 / 更新（小程序 openid 场景） ==========
 
+def get_or_create_by_phone(
+    db: Session,
+    phone: str,
+    *,
+    nickname: Optional[str] = None,
+    avatar_url: Optional[str] = None,
+    is_admin: Optional[bool] = None,
+    source: Optional[str] = "phone",
+) -> User:
+    """
+    幂等获取或创建（手机号登录）：
+    - 若存在：仅更新传入且发生变化的字段（nickname / avatar_url / is_admin / source）。
+    - 若不存在：创建并返回。
+    - 不在此函数 commit；调用方负责提交或使用事务上下文。
+    """
+    if not phone:
+        raise ValueError("phone 不能为空")
+
+    user = get_by_phone(db, phone)
+    if user:
+        changed = False
+        if nickname is not None and nickname != user.nickname:
+            user.nickname = nickname
+            changed = True
+        if avatar_url is not None and avatar_url != user.avatar_url:
+            user.avatar_url = avatar_url
+            changed = True
+        if is_admin is not None and is_admin != user.is_admin:
+            user.is_admin = is_admin
+            changed = True
+        if source is not None and source != user.source:
+            user.source = source
+            changed = True
+        if changed:
+            db.flush()  # 让更改在当前事务可见
+        return user
+
+    # 不存在则创建；处理并发下唯一约束竞争
+    user = User(
+        phone=phone,
+        nickname=nickname or f"用户{phone[-4:]}",  # 默认昵称：用户+后4位
+        username=slugify_username(nickname or f"user{phone[-4:]}"),
+        avatar_url=avatar_url or get_random_avatar(),
+        is_admin=bool(is_admin) if is_admin is not None else False,
+        source=source,
+    )
+    db.add(user)
+    try:
+        db.flush()  # 分配 ID，暴露唯一约束
+        return user
+    except IntegrityError:
+        db.rollback()  # 回滚本次插入
+        # 并发情况下可能已被其他事务创建，回读一次
+        existing = get_by_phone(db, phone)
+        if existing:
+            return existing
+        # 仍然找不到则抛出给上层处理
+        raise
+
 def get_or_create_by_openid(
     db: Session,
     openid: str,

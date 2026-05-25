@@ -9,6 +9,7 @@ from app.db import get_db, get_db_tx
 from app.security import create_access_token, hash_password, verify_password
 from app.services.users import (
     get_or_create_by_openid,
+    get_or_create_by_phone,
     create_user_email_password,
     get_by_email,
     touch_last_login,
@@ -287,6 +288,184 @@ def validate_invitation_code(
     return ValidateInvitationCodeResponse(
         valid=is_valid,
         message=error_msg if not is_valid else "邀请码有效"
+    )
+
+
+# ================================== 手机号登录 ==================================
+
+from app.schemas.phone_auth import (
+    PhoneSendCodeRequest,
+    PhoneSendCodeResponse,
+    PhoneLoginRequest,
+    PhoneLoginResponse,
+)
+from app.services.phone_verification import (
+    generate_code,
+    can_send_code as can_send_phone_code,
+    save_verification_code,
+    verify_code as verify_phone_code,
+    validate_china_phone,
+)
+from app.services.sms import create_sms_service
+from app.services.captcha import create_captcha_service
+from app.chat.store import _get_redis
+
+
+@router.post("/auth/phone/send-code", response_model=PhoneSendCodeResponse)
+async def send_phone_verification_code(
+    request: Request,
+    payload: PhoneSendCodeRequest,
+    db: Session = Depends(get_db),
+) -> PhoneSendCodeResponse:
+    """
+    发送手机验证码
+
+    - 验证图形验证码（生产环境）
+    - 验证手机号格式（国内11位，1开头）
+    - 检查频率限制（60秒/次，IP限制3次/60秒，每日10次）
+    - 生成6位数字验证码
+    - 发送短信（开发模式下输出到日志）
+    """
+    phone = payload.phone.strip()
+    client_ip = request.client.host if request.client else "unknown"
+
+    # Verify captcha first (if enabled)
+    captcha_service = create_captcha_service(settings)
+    if captcha_service.enabled:
+        if not payload.captcha_ticket or not payload.captcha_randstr:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请完成图形验证"
+            )
+
+        captcha_ok, captcha_msg = await captcha_service.verify_captcha(
+            ticket=payload.captcha_ticket,
+            randstr=payload.captcha_randstr,
+            user_ip=client_ip
+        )
+        if not captcha_ok:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=captcha_msg
+            )
+
+    # Validate phone format
+    if not validate_china_phone(phone):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="手机号格式错误，请输入11位有效手机号"
+        )
+
+    # Get Redis client
+    redis = _get_redis()
+    if not redis:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="验证码服务暂时不可用，请稍后重试"
+        )
+
+    # Check rate limits
+    can_send, error_msg = can_send_phone_code(redis, phone, client_ip)
+    if not can_send:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=error_msg
+        )
+
+    # Generate verification code
+    code = generate_code()
+
+    # Save to Redis
+    save_verification_code(
+        redis,
+        phone=phone,
+        code=code,
+        ip_address=client_ip,
+        purpose=payload.purpose,
+        expire_seconds=settings.sms_code_expire_minutes * 60
+    )
+
+    # Send SMS
+    sms_service = create_sms_service(settings)
+    success, message = await sms_service.send_verification_code(phone, code)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=message
+        )
+
+    return PhoneSendCodeResponse(
+        success=True,
+        message=message,
+        expires_in=settings.sms_code_expire_minutes * 60,
+        rate_limit_reset=settings.sms_rate_limit_seconds
+    )
+
+
+@router.post("/auth/phone/login", response_model=AuthResponse)
+def login_with_phone(
+    request: Request,
+    payload: PhoneLoginRequest,
+    db: Session = Depends(get_db_tx),
+) -> AuthResponse:
+    """
+    手机号验证码登录/注册
+
+    - 验证验证码是否正确且未过期
+    - 如果手机号已存在，直接登录
+    - 如果手机号不存在，自动注册新用户
+    - 返回 JWT token 和用户信息
+    """
+    phone = payload.phone.strip()
+    code = payload.code.strip()
+    client_ip = request.client.host if request.client else None
+
+    # Validate phone format
+    if not validate_china_phone(phone):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="手机号格式错误"
+        )
+
+    # Get Redis client
+    redis = _get_redis()
+    if not redis:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="验证码服务暂时不可用"
+        )
+
+    # Verify code
+    success, message = verify_phone_code(redis, phone, code, purpose="login")
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=message
+        )
+
+    # Get or create user
+    from app.services.users import get_by_phone
+    existing_user = get_by_phone(db, phone)
+    is_new_user = existing_user is None
+
+    user = get_or_create_by_phone(
+        db,
+        phone=phone,
+        nickname=payload.nickname,
+        avatar_url=payload.avatar_url,
+        source="phone",
+    )
+
+    # Update login timestamp
+    touch_last_login(db, user, ip=client_ip)
+
+    # Generate JWT token
+    token = create_access_token(user.id, extra={"is_admin": user.is_admin})
+
+    return AuthResponse(
+        access_token=token,
+        user=UserOut.model_validate(user)
     )
 
 
