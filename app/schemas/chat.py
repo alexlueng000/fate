@@ -60,6 +60,7 @@ class ChatStartReq(BaseModel):
     kb_index_dir: Optional[str] = None
     kb_topk: int = 0
     note: Optional[str] = None
+    task_context: Optional[Dict[str, Any]] = None
 
 class ChatInitResp(BaseModel):
     conversation_id: str
@@ -72,6 +73,7 @@ class ChatSendReq(BaseModel):
     conversation_id: str = Field(..., description="由 /chat/start 返回")
     message: str
     display_message: Optional[str] = Field(None, description="展示/入库用的用户消息，避免保存内部快捷 prompt")
+    task_context: Optional[Dict[str, Any]] = None
 
 class ChatSendResp(BaseModel):
     conversation_id: str

@@ -25,6 +25,7 @@ from app.schemas.liuyao_chat import (
     LiuyaoChatRegenerateReq,
     LiuyaoChatReply,
     LiuyaoChatSendReq,
+    LiuyaoChatStartReq,
 )
 from app.services.quota import QuotaService
 from app.core.logging import get_logger
@@ -418,6 +419,7 @@ def _load_user_hexagram(db: Session, hexagram_id: str, user: User) -> LiuyaoHexa
 def liuyao_chat_start(
     hexagram_id: str,
     request: Request,
+    req: LiuyaoChatStartReq | None = None,
     db: Session = Depends(get_db_tx),
     current_user: User = Depends(get_current_user),
 ):
@@ -435,6 +437,7 @@ def liuyao_chat_start(
         request=request,
         user_id=current_user.id,
         db=db,
+        task_context=req.task_context if req else None,
     )
 
     from fastapi.responses import StreamingResponse

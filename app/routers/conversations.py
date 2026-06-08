@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -37,6 +37,7 @@ class ConversationListItem(BaseModel):
     last_assistant_preview: Optional[str]
     bazi_summary: Optional[str] = None   # 八字才有，格式 "丙午·癸巳·庚辰·癸未"
     hexagram: Optional[HexagramSummary] = None  # 六爻才有
+    task_context: Optional[Dict[str, Any]] = None
 
 
 class ConversationListResp(BaseModel):
@@ -62,6 +63,7 @@ class ConversationDetailResp(BaseModel):
     profile: Optional[dict] = None       # 八字才有（命盘快照）
     profile_changed: bool = False        # 命盘是否已被用户修改过
     hexagram: Optional[dict] = None      # 六爻才有
+    task_context: Optional[Dict[str, Any]] = None
 
 
 class DeleteConversationsResp(BaseModel):
@@ -219,6 +221,7 @@ def list_conversations(
             last_assistant_preview=_preview(last_asst),
             bazi_summary=_four_pillars_summary(conv.bazi_chart_snapshot) if type == "bazi" else None,
             hexagram=hexagram_summary,
+            task_context=conv.task_context,
         ))
 
     return ConversationListResp(
@@ -312,6 +315,7 @@ def get_conversation(
         profile=profile_data,
         profile_changed=profile_changed,
         hexagram=hexagram_data,
+        task_context=conv.task_context,
     )
 
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from typing import Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
@@ -49,7 +49,10 @@ def _parse_db_conversation_id(conversation_id: str) -> Optional[int]:
 
 
 def _create_db_conversation(
-    db: Session, user_id: int, hexagram: LiuyaoHexagram
+    db: Session,
+    user_id: int,
+    hexagram: LiuyaoHexagram,
+    task_context: Optional[Dict[str, Any]] = None,
 ) -> int:
     """为这次解卦新建一条对话记录。"""
     title = f"六爻｜{(hexagram.question or '')[:24]}"
@@ -57,6 +60,7 @@ def _create_db_conversation(
         user_id=user_id,
         title=title,
         liuyao_hexagram_id=hexagram.id,
+        task_context=task_context,
     )
     db.add(conv)
     db.commit()
@@ -131,6 +135,7 @@ def start_liuyao_chat(
     request: Request,
     user_id: int,
     db: Session,
+    task_context: Optional[Dict[str, Any]] = None,
 ):
     """
     开始六爻对话：
@@ -155,7 +160,7 @@ def start_liuyao_chat(
     system_prompt = build_system_prompt(hexagram, kb_passages, base_prompt=base_prompt)
     opening_user_msg = build_opening_user_message(hexagram)
 
-    db_conv_id = _create_db_conversation(db, user_id, hexagram)
+    db_conv_id = _create_db_conversation(db, user_id, hexagram, task_context=task_context)
     cid = f"liuyao_conv_{db_conv_id}"
 
     set_conv(cid, {
@@ -165,6 +170,7 @@ def start_liuyao_chat(
         "db_conv_id": db_conv_id,
         "liuyao_hexagram_id": hexagram.id,
         "kind": "liuyao",
+        "task_context": task_context,
     })
 
     messages = _build_messages(system_prompt, [], extra_user=opening_user_msg)
@@ -290,6 +296,7 @@ def _send_streaming_message(
                             "db_conv_id": db_conv_id_int,
                             "liuyao_hexagram_id": hexagram.id,
                             "kind": "liuyao",
+                            "task_context": db_conv.task_context,
                         })
                         conv = get_conv(conversation_id)
                         logger.info("liuyao_conversation_recovered", conversation_id=conversation_id, msg_count=len(history))

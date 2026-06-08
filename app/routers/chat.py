@@ -81,6 +81,7 @@ def chat_start(
         user_id=user_id,
         db=db,
         profile_id=profile_id,
+        task_context=req.task_context,
     )
     # 流式：直接返回 StreamingResponse
     from fastapi.responses import StreamingResponse
@@ -118,6 +119,7 @@ def chat_send(
             user_id=user_id,
             db=db,
             display_message=req.display_message,
+            task_context=req.task_context,
         )
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))

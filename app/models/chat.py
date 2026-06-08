@@ -68,6 +68,12 @@ class Conversation(Base):
         comment="会话创建时的命盘快照，防止用户改命盘后历史会话上下文错乱"
     )
 
+    task_context: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="任务流上下文，例如事业选择的分诊结果、下一步和复盘提示"
+    )
+
     title: Mapped[str] = mapped_column(
         String(255),
         nullable=False,

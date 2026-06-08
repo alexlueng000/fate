@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
+
+
+class LiuyaoChatStartReq(BaseModel):
+    task_context: Optional[Dict[str, Any]] = None
 
 
 class LiuyaoChatSendReq(BaseModel):

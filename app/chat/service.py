@@ -49,6 +49,7 @@ def _create_db_conversation(
     title: str = "八字解读",
     profile_id: Optional[int] = None,
     bazi_chart_snapshot: Optional[Dict[str, Any]] = None,
+    task_context: Optional[Dict[str, Any]] = None,
 ) -> int:
     """创建数据库对话记录，返回对话ID"""
     from app.models.chat import Conversation
@@ -57,6 +58,7 @@ def _create_db_conversation(
         title=title,
         profile_id=profile_id,
         bazi_chart_snapshot=bazi_chart_snapshot,
+        task_context=task_context,
     )
     db.add(conv)
     db.commit()
@@ -100,7 +102,8 @@ def start_chat(
     request: Request,
     user_id: Optional[int] = None,
     db: Optional[Session] = None,
-    profile_id: Optional[int] = None
+    profile_id: Optional[int] = None,
+    task_context: Optional[Dict[str, Any]] = None,
 ):
     """
     Start a new chat conversation with initial Bazi analysis.
@@ -156,6 +159,7 @@ def start_chat(
                         db, user_id, "八字解读",
                         profile_id=profile_id,
                         bazi_chart_snapshot=paipan,
+                        task_context=task_context,
                     )
                     cid = f"bazi_conv_{db_conv_id}"  # 使用数据库ID，添加类型前缀
                     logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid, profile_id=profile_id)
@@ -174,6 +178,7 @@ def start_chat(
                 "db_conv_id": db_conv_id,
                 "kind": "bazi",
                 "paipan": paipan,
+                "task_context": task_context,
             })
 
         opening_user_msg = (
@@ -328,6 +333,7 @@ def init_chat(
     db: Optional[Session] = None,
     profile_id: Optional[int] = None,
     paipan: Optional[Dict[str, Any]] = None,
+    task_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     初始化会话（不生成 AI 开场白），仅创建会话并返回 conversation_id。
@@ -356,6 +362,7 @@ def init_chat(
                 db, user_id, "八字解读",
                 profile_id=profile_id,
                 bazi_chart_snapshot=paipan,
+                task_context=task_context,
             )
             cid = f"bazi_conv_{db_conv_id}"
         except Exception:
@@ -371,6 +378,7 @@ def init_chat(
         "db_conv_id": db_conv_id,
         "paipan": paipan or {},
         "kind": "bazi",
+        "task_context": task_context,
     })
 
     logger.info("init_chat_created", cid=cid, user_id=user_id, profile_id=profile_id)
@@ -384,6 +392,7 @@ def send_chat(
     user_id: Optional[int] = None,
     db: Optional[Session] = None,
     display_message: Optional[str] = None,
+    task_context: Optional[Dict[str, Any]] = None,
 ):
     """
     Send a message in an existing conversation.
@@ -454,6 +463,7 @@ def send_chat(
                         "db_conv_id": db_conv_id_int,
                         "paipan": paipan,
                         "kind": "bazi",
+                        "task_context": db_conv.task_context,
                     })
                     conv = get_conv(conversation_id)
                     logger.info("conversation_recovered", conversation_id=conversation_id, user_id=user_id, msg_count=len(history))
@@ -471,6 +481,17 @@ def send_chat(
     # 获取持久化信息
     user_id = conv.get("user_id")
     db_conv_id = conv.get("db_conv_id")
+    if task_context:
+        conv["task_context"] = task_context
+        if db_conv_id and db:
+            try:
+                from app.models.chat import Conversation
+                db_conv = db.get(Conversation, db_conv_id)
+                if db_conv and db_conv.user_id == user_id:
+                    db_conv.task_context = task_context
+                    db.commit()
+            except Exception as e:
+                logger.error("task_context_persist_failed", error=str(e), conversation_id=conversation_id)
 
     # 查找本地知识库
     kb_dir = conv.get("kb_index_dir")
