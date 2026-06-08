@@ -1,6 +1,7 @@
 import re
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends
@@ -23,6 +24,8 @@ Gender = Literal["男", "女"]
 Calendar = Literal["gregorian", "lunar"]
 
 router = APIRouter(prefix="/bazi", tags=["bazi"])
+
+WEEKDAYS_CN = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
 
 #========================================
 # COZE版代码
@@ -72,6 +75,31 @@ def _split_ganzhi_to_list(gz: str) -> List[str]:
     s = str(gz).strip().replace(" ", "")
     # 标准干支长度应为2（一个天干+一个地支）
     return [s[0], s[1]] if len(s) == 2 else []
+
+
+@router.get("/today_lunar")
+def get_today_lunar():
+    """Return today's lunar calendar summary using lunar-python."""
+    today = datetime.now(ZoneInfo("Asia/Shanghai"))
+    solar = Solar.fromYmdHms(today.year, today.month, today.day, today.hour, today.minute, today.second)
+    lunar = solar.getLunar()
+
+    lunar_month = lunar.getMonthInChinese()
+    lunar_day = lunar.getDayInChinese()
+    lunar_date = f"农历{lunar_month}月{lunar_day}"
+    ganzhi = {
+        "year": lunar.getYearInGanZhi(),
+        "month": lunar.getMonthInGanZhi(),
+        "day": lunar.getDayInGanZhi(),
+    }
+
+    return {
+        "solar_date": today.strftime("%Y-%m-%d"),
+        "lunar_date": lunar_date,
+        "ganzhi": ganzhi,
+        "weekday": WEEKDAYS_CN[today.weekday()],
+        "display": f"{lunar_date} · {ganzhi['year']}年 {ganzhi['month']}月 {ganzhi['day']}日 · {WEEKDAYS_CN[today.weekday()]}",
+    }
 
 class PaipanIn(BaseModel):
     gender: Gender                         # "男" / "女"
