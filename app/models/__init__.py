@@ -15,6 +15,7 @@ from .webhook_log import WebhookLog
 from .api_call_log import ApiCallLog
 from .emotion import EmotionRecord, ExceptionMoment, ValueAction
 from .liuyao import LiuyaoHexagram
+from .career_progress import CareerProgress
 
 
 __all__ = [
@@ -39,4 +40,5 @@ __all__ = [
     "ExceptionMoment",
     "ValueAction",
     "LiuyaoHexagram",
+    "CareerProgress",
 ]
