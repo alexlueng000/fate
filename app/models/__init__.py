@@ -16,6 +16,7 @@ from .api_call_log import ApiCallLog
 from .emotion import EmotionRecord, ExceptionMoment, ValueAction
 from .liuyao import LiuyaoHexagram
 from .career_progress import CareerProgress
+from .relationship_progress import RelationshipProgress
 from .user_event import UserEvent
 
 
@@ -42,5 +43,6 @@ __all__ = [
     "ValueAction",
     "LiuyaoHexagram",
     "CareerProgress",
+    "RelationshipProgress",
     "UserEvent",
 ]
