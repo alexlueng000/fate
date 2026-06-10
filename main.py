@@ -16,7 +16,7 @@ from app.routers import (
     chat, bazi, users, chat_basic, admin, config_public, kb,
     invitation_codes, sensitive_words, feedback, admin_stats, user_stats,
     message_rating, quota, products, orders, payments, webhooks, profile,
-    emotion, liuyao, conversations, career_progress,
+    emotion, liuyao, conversations, career_progress, events,
 )
 
 
@@ -80,6 +80,9 @@ def create_app() -> FastAPI:
 
     # 事业任务进展
     app.include_router(career_progress.router, prefix="/api", tags=["career-progress"])
+
+    # 用户行为埋点
+    app.include_router(events.router, prefix="/api", tags=["events"])
 
     @app.get("/api/ping")
     def ping():

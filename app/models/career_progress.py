@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import DateTime, ForeignKey, Index, String, Text, func
-from sqlalchemy.dialects.mysql import BIGINT, INTEGER, JSON
+from sqlalchemy.dialects.mysql import BIGINT, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -29,7 +29,7 @@ class CareerProgress(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        INTEGER(unsigned=True),
+        BIGINT(unsigned=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -76,4 +76,3 @@ class CareerProgress(Base):
     )
 
     user = relationship("User", passive_deletes=True)
-
