@@ -8,8 +8,11 @@ from .quota import UserQuota
 from .usage_log import UsageLog
 from .message_rating import MessageRating
 from .product import Product
+from .product_grant import ProductGrant
 from .order import Order
 from .payment import Payment
+from .membership import UserMembership
+from .video import VideoCourse, VideoLesson, VideoWatchProgress
 from .entitlement import Entitlement
 from .webhook_log import WebhookLog
 from .api_call_log import ApiCallLog
@@ -33,8 +36,13 @@ __all__ = [
     "UsageLog",
     "MessageRating",
     "Product",
+    "ProductGrant",
     "Order",
     "Payment",
+    "UserMembership",
+    "VideoCourse",
+    "VideoLesson",
+    "VideoWatchProgress",
     "Entitlement",
     "WebhookLog",
     "ApiCallLog",

@@ -15,7 +15,8 @@ from app.schemas import (
 )
 from app.services import payments as pay_service
 from app.services import orders as order_service
-from app.services.products import get_by_code, grant_product_quota
+from app.services.membership_service import apply_paid_product
+from app.services.products import get_by_code
 from app.services.quota import QuotaService
 from app.models import User, Order
 
@@ -85,13 +86,16 @@ def simulate_payment(
         raw="simulate",
     )
 
-    # 3) 发放套餐配额
-    granted = grant_product_quota(
+    # 3) 发放权益；会员商品会同时开通/续期会员有效期
+    membership, granted_raw = apply_paid_product(
         db,
         user_id=current_user.id,
         product=product,
+        order=order,
         source="simulate",
     )
+    label_map = {"chat": "bazi", "liuyao_chat": "liuyao"}
+    granted = {label_map.get(key, key): value for key, value in granted_raw.items()}
 
     # 4) 返回最新配额快照
     stats = QuotaService.get_user_stats(db, current_user.id)
@@ -100,6 +104,7 @@ def simulate_payment(
     return SimulatePaymentOut(
         order_id=order.id,
         product_code=product.code,
+        membership_id=membership.id if membership else None,
         granted=granted,
         quotas=quotas,
     )
