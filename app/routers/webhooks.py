@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
 from app.db import get_db_tx
 from app.models import WebhookLog, Order
 from app.services import payments as pay_service
-from app.services.products import grant_product_quota
+from app.services.membership_service import apply_paid_product
 from app.config import settings
 
 # cryptography for RSA verify & AES-GCM decrypt
@@ -139,7 +140,7 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
                 # ✅ 发放权益（套餐内含 bazi / liuyao 多类型次数）
-                grant_product_quota(db, user_id=order.user_id, product=order.product, source="purchase")  # type: ignore[arg-type]
+                apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
 
                 processed = True
 
@@ -162,7 +163,7 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
                 # ✅ 发放权益（开发模式同样执行；套餐多类型次数）
-                grant_product_quota(db, user_id=order.user_id, product=order.product, source="purchase")  # type: ignore[arg-type]
+                apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
 
                 processed = True
 
@@ -181,7 +182,7 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
             return {"code": "FAIL", "message": "internal error"}, 500
 
 
-@router.post("/alipay", response_class=None)
+@router.post("/alipay", response_class=PlainTextResponse)
 async def alipay_callback(request: Request, db: Session = Depends(get_db_tx)):
     """
     支付宝异步通知回调：
@@ -190,8 +191,6 @@ async def alipay_callback(request: Request, db: Session = Depends(get_db_tx)):
     成功时：标记支付成功 + 发放配额
     返回 "success" 纯文本（支付宝要求）
     """
-    from fastapi.responses import PlainTextResponse
-
     body_bytes = await request.body()
     payload_text = body_bytes.decode("utf-8") or "{}"
 
@@ -215,7 +214,7 @@ async def alipay_callback(request: Request, db: Session = Depends(get_db_tx)):
             order = db.query(Order).filter(Order.out_trade_no == str(out_trade_no)).first()  # type: ignore
             if order:
                 pay_service.mark_success(db, order=order, transaction_id=str(trade_no), raw=payload_text)
-                grant_product_quota(db, user_id=order.user_id, product=order.product, source="purchase")  # type: ignore[arg-type]
+                apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
                 processed = True
 
         _log_webhook(db, source="ALIPAY", event_type=trade_status, payload_text=payload_text, processed=processed)
