@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.security.utils import get_authorization_scheme_param
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,15 @@ logger = get_logger("auth")
 
 
 # 让 Swagger “Authorize” 按钮可用；虽不必真的走 /auth/login 表单流，但可复用取 token 的机制
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _token_from_credentials(credentials: Optional[HTTPAuthorizationCredentials]) -> Optional[str]:
+    if not credentials:
+        return None
+    if credentials.scheme.lower() != "bearer":
+        return None
+    return credentials.credentials
 
 
 def _extract_bearer_token(request: Request) -> Optional[str]:
@@ -41,15 +49,16 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
 async def get_current_user(
     request: Request,
     db: Session = Depends(get_db),
-    token_from_swagger: Optional[str] = Depends(oauth2_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> models.User:
     """
     强制需要登录的依赖：
-    - 优先从 Swagger 的 oauth2_scheme 取 token（便于交互式调试）
+    - 优先从 Swagger 的 HTTP Bearer 取 token（便于交互式调试）
     - 若没有，再从原始 Authorization 头里取
     - 成功解析后用 payload['sub'] 查询用户
     """
 
+    token_from_swagger = _token_from_credentials(credentials)
     logger.debug("get_current_user", token_present=bool(token_from_swagger))
 
     token = token_from_swagger or _extract_bearer_token(request)
@@ -77,7 +86,7 @@ async def get_current_user(
 async def get_current_user_optional(
     request: Request,
     db: Session = Depends(get_db),
-    token_from_swagger: Optional[str] = Depends(oauth2_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
 ) -> Optional[models.User]:
     """
     可选登录的依赖：
@@ -85,7 +94,7 @@ async def get_current_user_optional(
     - 若未带或无效，返回 None（不抛异常）
     适合“读接口，但登录用户可享更多信息”的场景。
     """
-    token = token_from_swagger or _extract_bearer_token(request)
+    token = _token_from_credentials(credentials) or _extract_bearer_token(request)
     if not token:
         return None
 
