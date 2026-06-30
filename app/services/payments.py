@@ -1,12 +1,21 @@
 # app/services/payments.py
 from __future__ import annotations
 
-from datetime import datetime
+import base64
+import json
+import secrets
+import time
 from typing import Optional
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding as asy_padding
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+from app.config import settings
 from app.models import Order, Payment
 
 
@@ -62,6 +71,124 @@ def create_prepay(
     db.add(pay)
     db.flush()
     return pay
+
+
+def _load_merchant_private_key() -> bytes:
+    if settings.wechat_pay_private_key_pem:
+        return settings.wechat_pay_private_key_pem.encode("utf-8")
+    if settings.wechat_pay_private_key_path:
+        with open(settings.wechat_pay_private_key_path, "rb") as f:
+            return f.read()
+    raise ValueError("WeChat merchant private key is not configured")
+
+
+def _wechat_appid() -> str:
+    appid = settings.wechat_pay_appid or settings.wx_appid
+    if not appid:
+        raise ValueError("WECHAT_PAY_APPID or WX_APPID is not configured")
+    return appid
+
+
+def _wechat_notify_url() -> str:
+    if settings.wechat_pay_notify_url:
+        return settings.wechat_pay_notify_url
+    raise ValueError("WECHAT_PAY_NOTIFY_URL is not configured")
+
+
+def _wechat_auth_header(method: str, url_path: str, body: str) -> str:
+    if not settings.wechat_pay_mchid:
+        raise ValueError("WECHAT_PAY_MCHID is not configured")
+    if not settings.wechat_pay_merchant_serial_no:
+        raise ValueError("WECHAT_PAY_MERCHANT_SERIAL_NO is not configured")
+
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_hex(16)
+    message = f"{method}\n{url_path}\n{timestamp}\n{nonce}\n{body}\n"
+
+    private_key = load_pem_private_key(_load_merchant_private_key(), password=None)
+    signature = private_key.sign(
+        message.encode("utf-8"),
+        asy_padding.PKCS1v15(),
+        hashes.SHA256(),
+    )
+    signature_text = base64.b64encode(signature).decode("utf-8")
+
+    return (
+        'WECHATPAY2-SHA256-RSA2048 '
+        f'mchid="{settings.wechat_pay_mchid}",'
+        f'nonce_str="{nonce}",'
+        f'timestamp="{timestamp}",'
+        f'serial_no="{settings.wechat_pay_merchant_serial_no}",'
+        f'signature="{signature_text}"'
+    )
+
+
+def create_wechat_native_prepay(db: Session, *, order: Order) -> Payment:
+    """
+    Create a WeChat Pay v3 Native prepay order and store the returned QR code URL.
+    """
+    if order.status != "CREATED":
+        raise ValueError("Order is not in CREATED status")
+
+    if settings.wechat_pay_mode != "prod":
+        payment = Payment(
+            order_id=order.id,
+            channel="WECHAT_NATIVE",
+            prepay_id=f"dev_native_{order.out_trade_no}",
+            pay_url=f"weixin://wxpay/bizpayurl?pr=dev_{order.out_trade_no}",
+            status="PENDING",
+            raw=json.dumps({"mode": "dev", "out_trade_no": order.out_trade_no}, ensure_ascii=False),
+        )
+        db.add(payment)
+        db.flush()
+        return payment
+
+    url_path = "/v3/pay/transactions/native"
+    body_dict = {
+        "appid": _wechat_appid(),
+        "mchid": settings.wechat_pay_mchid,
+        "description": order.product.name[:127],
+        "out_trade_no": order.out_trade_no,
+        "notify_url": _wechat_notify_url(),
+        "amount": {
+            "total": order.amount_cents,
+            "currency": order.currency,
+        },
+    }
+    body = json.dumps(body_dict, ensure_ascii=False, separators=(",", ":"))
+    headers = {
+        "Authorization": _wechat_auth_header("POST", url_path, body),
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "User-Agent": "fateinsight/1.0",
+    }
+
+    with httpx.Client(timeout=15) as client:
+        response = client.post(
+            f"https://api.mch.weixin.qq.com{url_path}",
+            content=body.encode("utf-8"),
+            headers=headers,
+        )
+
+    if response.status_code >= 400:
+        raise ValueError(f"WeChat Native prepay failed: {response.text}")
+
+    data = response.json()
+    code_url = data.get("code_url")
+    if not code_url:
+        raise ValueError("WeChat Native prepay response missing code_url")
+
+    payment = Payment(
+        order_id=order.id,
+        channel="WECHAT_NATIVE",
+        prepay_id=None,
+        pay_url=code_url,
+        status="PENDING",
+        raw=response.text,
+    )
+    db.add(payment)
+    db.flush()
+    return payment
 
 
 # ---------- 标记成功/失败（回调用） ----------

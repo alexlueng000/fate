@@ -17,8 +17,15 @@ class QuotaService:
     - 内测阶段默认无限制 (total_quota = -1)
     """
 
-    # 内测阶段默认无限制
-    DEFAULT_FREE_QUOTA = -1
+    DEFAULT_FREE_QUOTA = 10
+    DEFAULT_FREE_QUOTAS = {
+        "chat": 10,
+        "liuyao_chat": 10,
+    }
+
+    @staticmethod
+    def default_free_quota(quota_type: str) -> int:
+        return QuotaService.DEFAULT_FREE_QUOTAS.get(quota_type, QuotaService.DEFAULT_FREE_QUOTA)
 
     @staticmethod
     def get_or_create_quota(
@@ -38,7 +45,7 @@ class QuotaService:
             quota = UserQuota(
                 user_id=user_id,
                 quota_type=quota_type,
-                total_quota=QuotaService.DEFAULT_FREE_QUOTA,
+                total_quota=QuotaService.default_free_quota(quota_type),
                 used_quota=0,
                 period="never",
                 source="free",

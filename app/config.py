@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     # -----------------------------
     # 'prod'：严格验签/解密；'dev'：跳过验签便于联调
     wechat_pay_mode: str = "dev"
+    wechat_pay_appid: Optional[str] = None
+    wechat_pay_mchid: Optional[str] = None
+    wechat_pay_merchant_serial_no: Optional[str] = None
+    wechat_pay_private_key_pem: Optional[str] = None
+    wechat_pay_private_key_path: Optional[str] = None
+    wechat_pay_notify_url: Optional[str] = None
     # 32字节 APIv3 Key；生产必填
     wechat_api_v3_key: Optional[str] = None
     # 平台公钥（或证书）PEM 内容（任选其一：PEM 或 Path）

@@ -142,6 +142,17 @@ class SimulatePaymentOut(BaseModel):
         default_factory=dict,
         description="本次发放明细，例如 {\"bazi\": 10, \"liuyao\": 3}",
     )
+    quotas: List[QuotaSnapshot] = Field(default_factory=list)
+
+
+class WeChatNativeCheckoutIn(BaseModel):
+    product_code: str
+
+
+class WeChatNativeCheckoutOut(BaseModel):
+    order: OrderOut
+    payment: PaymentOut
+    code_url: str
 
 
 class MembershipOut(BaseModel):
@@ -209,7 +220,3 @@ class VideoProgressOut(BaseModel):
     last_watched_at: Optional[datetime] = None
 
     model_config = dict(from_attributes=True)
-    quotas: List[QuotaSnapshot] = Field(
-        default_factory=list,
-        description="发放后用户全部配额快照",
-    )

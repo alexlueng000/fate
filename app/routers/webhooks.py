@@ -136,11 +136,18 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 if not order:
                     raise HTTPException(status_code=404, detail="Order not found")
 
+                paid_amount = (resource_plain.get("amount") or {}).get("total")
+                if paid_amount != order.amount_cents:
+                    raise HTTPException(status_code=400, detail="Payment amount mismatch")
+
+                already_paid = order.status == "PAID"
+
                 # 支付成功
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
                 # ✅ 发放权益（套餐内含 bazi / liuyao 多类型次数）
-                apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
+                if not already_paid:
+                    apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
 
                 processed = True
 
@@ -160,10 +167,12 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 if not order:
                     raise HTTPException(status_code=404, detail="Order not found")
 
+                already_paid = order.status == "PAID"
                 pay_service.mark_success(db, order=order, transaction_id=str(transaction_id), raw=payload_text)
 
                 # ✅ 发放权益（开发模式同样执行；套餐多类型次数）
-                apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
+                if not already_paid:
+                    apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
 
                 processed = True
 
@@ -213,8 +222,10 @@ async def alipay_callback(request: Request, db: Session = Depends(get_db_tx)):
         if trade_status in ("TRADE_SUCCESS", "TRADE_FINISHED") and out_trade_no:
             order = db.query(Order).filter(Order.out_trade_no == str(out_trade_no)).first()  # type: ignore
             if order:
+                already_paid = order.status == "PAID"
                 pay_service.mark_success(db, order=order, transaction_id=str(trade_no), raw=payload_text)
-                apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
+                if not already_paid:
+                    apply_paid_product(db, user_id=order.user_id, product=order.product, order=order, source="purchase")  # type: ignore[arg-type]
                 processed = True
 
         _log_webhook(db, source="ALIPAY", event_type=trade_status, payload_text=payload_text, processed=processed)

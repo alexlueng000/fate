@@ -12,6 +12,8 @@ from app.schemas import (
     SimulatePaymentIn,
     SimulatePaymentOut,
     QuotaSnapshot,
+    WeChatNativeCheckoutIn,
+    WeChatNativeCheckoutOut,
 )
 from app.services import payments as pay_service
 from app.services import orders as order_service
@@ -21,6 +23,25 @@ from app.services.quota import QuotaService
 from app.models import User, Order
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+
+@router.post("/wechat/native", response_model=WeChatNativeCheckoutOut, status_code=status.HTTP_201_CREATED)
+def create_wechat_native_checkout(
+    body: WeChatNativeCheckoutIn,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+) -> WeChatNativeCheckoutOut:
+    product = get_by_code(db, body.product_code, active_only=True)
+    if not product:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架")
+
+    order = order_service._create_order(db, user=current_user, product=product)  # noqa: SLF001
+    try:
+        payment = pay_service.create_wechat_native_prepay(db, order=order)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    return WeChatNativeCheckoutOut(order=order, payment=payment, code_url=payment.pay_url or "")
 
 
 @router.post("/prepay", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
