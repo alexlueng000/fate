@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger
 from app.db import get_db_tx
 from app.models import WebhookLog, Order
 from app.services import payments as pay_service
@@ -23,6 +24,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_public_key
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+logger = get_logger("webhooks")
 
 # 运行模式：prod 严格校验；dev 跳过校验便于联调
 PAY_MODE: str = getattr(settings, "wechat_pay_mode", "dev")  # 'prod' or 'dev'
@@ -180,15 +182,35 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
             return {"code": "SUCCESS", "message": "dev processed" if processed else "dev ignored"}
 
     except HTTPException as e:
+        logger.warning(
+            "wechatpay_callback_failed",
+            status_code=e.status_code,
+            detail=e.detail,
+            headers={
+                "Wechatpay-Timestamp": headers.timestamp,
+                "Wechatpay-Nonce": headers.nonce,
+                "Wechatpay-Serial": headers.serial,
+            },
+        )
         try:
             _log_webhook(db, source="WECHAT", event_type=None, payload_text=payload_text, processed=False)
         finally:
-            return ({"code": "FAIL", "message": e.detail if isinstance(e.detail, str) else "error"}, e.status_code)
-    except Exception:
+            return JSONResponse(
+                status_code=e.status_code,
+                content={
+                    "code": "FAIL",
+                    "message": e.detail if isinstance(e.detail, str) else "error",
+                },
+            )
+    except Exception as e:
+        logger.exception("wechatpay_callback_unhandled_error", error=str(e))
         try:
             _log_webhook(db, source="WECHAT", event_type=None, payload_text=payload_text, processed=False)
         finally:
-            return {"code": "FAIL", "message": "internal error"}, 500
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"code": "FAIL", "message": "internal error"},
+            )
 
 
 @router.post("/alipay", response_class=PlainTextResponse)
