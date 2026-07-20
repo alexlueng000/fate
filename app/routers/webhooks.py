@@ -8,13 +8,15 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, PlainTextResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.db import get_db_tx
-from app.models import WebhookLog, Order
+from app.models import WebhookLog, Order, Refund
 from app.services import payments as pay_service
 from app.services.membership_service import apply_paid_product
+from app.services.refunds import WeChatRefundError, sync_refund_state
 from app.config import settings
 
 # cryptography for RSA verify & AES-GCM decrypt
@@ -211,6 +213,140 @@ async def wechatpay_callback(request: Request, db: Session = Depends(get_db_tx))
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 content={"code": "FAIL", "message": "internal error"},
             )
+
+
+@router.post("/wechatpay/refund")
+async def wechatpay_refund_callback(
+    request: Request,
+    db: Session = Depends(get_db_tx),
+):
+    """Verify, decrypt, and idempotently persist a WeChat refund notification."""
+
+    body_bytes = await request.body()
+    payload_text = body_bytes.decode("utf-8") or "{}"
+    headers = WxHeaders(
+        timestamp=request.headers.get("Wechatpay-Timestamp", ""),
+        nonce=request.headers.get("Wechatpay-Nonce", ""),
+        signature=request.headers.get("Wechatpay-Signature", ""),
+        serial=request.headers.get("Wechatpay-Serial", ""),
+    )
+
+    try:
+        if PAY_MODE == "prod":
+            _verify_signature(headers, body_bytes)
+            outer = json.loads(payload_text)
+            event_type = str(outer.get("event_type") or "")
+            if event_type not in {
+                "REFUND.SUCCESS",
+                "REFUND.CLOSED",
+                "REFUND.ABNORMAL",
+            }:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Unsupported refund event type",
+                )
+            data = _decrypt_resource(outer.get("resource") or {})
+            data.setdefault("refund_status", event_type.removeprefix("REFUND."))
+        else:
+            data = json.loads(payload_text)
+            event_type = str(data.get("event_type") or "REFUND.SUCCESS")
+            data.setdefault("refund_status", event_type.removeprefix("REFUND."))
+
+        out_refund_no = str(data.get("out_refund_no") or "")
+        if not out_refund_no:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing out_refund_no",
+            )
+
+        refund = db.execute(
+            select(Refund)
+            .where(Refund.out_refund_no == out_refund_no)
+            .with_for_update()
+        ).scalars().first()
+        if not refund:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Refund not found",
+            )
+
+        callback_trade_no = data.get("out_trade_no")
+        if callback_trade_no and callback_trade_no != refund.order.out_trade_no:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Refund order number mismatch",
+            )
+
+        amount = data.get("amount") or {}
+        callback_refund = amount.get("refund")
+        callback_total = amount.get("total")
+        callback_currency = amount.get("currency")
+        if callback_refund is not None and callback_refund != refund.refund_cents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Refund amount mismatch",
+            )
+        if callback_total is not None and callback_total != refund.total_cents:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Refund total amount mismatch",
+            )
+        if callback_currency is not None and callback_currency != refund.currency:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Refund currency mismatch",
+            )
+
+        sync_refund_state(
+            db,
+            refund=refund,
+            data=data,
+            raw_response=payload_text,
+        )
+        _log_webhook(
+            db,
+            source="WECHAT_REFUND",
+            event_type=event_type,
+            payload_text=payload_text,
+            processed=True,
+        )
+        return {"code": "SUCCESS", "message": "成功"}
+
+    except (HTTPException, WeChatRefundError) as exc:
+        status_code = (
+            exc.status_code if isinstance(exc, HTTPException) else status.HTTP_400_BAD_REQUEST
+        )
+        detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+        logger.warning(
+            "wechatpay_refund_callback_failed",
+            status_code=status_code,
+            detail=detail,
+            serial=headers.serial,
+        )
+        _log_webhook(
+            db,
+            source="WECHAT_REFUND",
+            event_type=None,
+            payload_text=payload_text,
+            processed=False,
+        )
+        return JSONResponse(
+            status_code=status_code,
+            content={"code": "FAIL", "message": detail},
+        )
+    except Exception as exc:
+        logger.exception("wechatpay_refund_callback_unhandled_error", error=str(exc))
+        _log_webhook(
+            db,
+            source="WECHAT_REFUND",
+            event_type=None,
+            payload_text=payload_text,
+            processed=False,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"code": "FAIL", "message": "internal error"},
+        )
 
 
 @router.post("/alipay", response_class=PlainTextResponse)

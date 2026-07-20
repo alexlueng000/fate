@@ -18,6 +18,7 @@ from app.routers import (
     message_rating, quota, products, orders, payments, webhooks, profile,
     emotion, liuyao, conversations, career_progress, relationship_progress, events,
     membership, videos,
+    admin_refunds,
 )
 
 
@@ -71,6 +72,7 @@ def create_app() -> FastAPI:
     app.include_router(webhooks.router, prefix="/api", tags=["webhooks"])
     app.include_router(membership.router, prefix="/api", tags=["membership"])
     app.include_router(videos.router, prefix="/api", tags=["videos"])
+    app.include_router(admin_refunds.router, prefix="/api", tags=["admin-refunds"])
 
     # 心镜灯功能
     app.include_router(emotion.router, prefix="/api", tags=["emotion"])

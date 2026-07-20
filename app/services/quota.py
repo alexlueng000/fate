@@ -31,15 +31,21 @@ class QuotaService:
     def get_or_create_quota(
         db: Session,
         user_id: int,
-        quota_type: str = "chat"
+        quota_type: str = "chat",
+        *,
+        commit: bool = True,
+        for_update: bool = False,
     ) -> UserQuota:
         """
         获取或创建用户配额记录
         """
-        quota = db.query(UserQuota).filter(
+        query = db.query(UserQuota).filter(
             UserQuota.user_id == user_id,
             UserQuota.quota_type == quota_type
-        ).first()
+        )
+        if for_update:
+            query = query.with_for_update()
+        quota = query.first()
 
         if not quota:
             quota = UserQuota(
@@ -51,8 +57,11 @@ class QuotaService:
                 source="free",
             )
             db.add(quota)
-            db.commit()
-            db.refresh(quota)
+            if commit:
+                db.commit()
+                db.refresh(quota)
+            else:
+                db.flush()
 
         return quota
 
@@ -201,14 +210,22 @@ class QuotaService:
         user_id: int,
         amount: int,
         quota_type: str = "chat",
-        source: str = "purchase"
+        source: str = "purchase",
+        *,
+        commit: bool = True,
     ) -> UserQuota:
         """
         增加用户配额（购买后发放）
         - 如果是无限制（-1），则设置为具体数值
         - 否则累加到现有配额
         """
-        quota = QuotaService.get_or_create_quota(db, user_id, quota_type)
+        quota = QuotaService.get_or_create_quota(
+            db,
+            user_id,
+            quota_type,
+            commit=commit,
+            for_update=not commit,
+        )
 
         if quota.total_quota == -1:
             # 从无限制变为有限制
@@ -219,8 +236,11 @@ class QuotaService:
             quota.total_quota += amount
 
         quota.source = source
-        db.commit()
-        db.refresh(quota)
+        if commit:
+            db.commit()
+            db.refresh(quota)
+        else:
+            db.flush()
         return quota
 
     @staticmethod

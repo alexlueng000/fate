@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding as asy_padding
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from cryptography.hazmat.primitives.serialization import (
+    load_pem_private_key,
+    load_pem_public_key,
+)
 
 from app.config import settings
 from app.models import Order, Payment
@@ -121,6 +124,43 @@ def _wechat_auth_header(method: str, url_path: str, body: str) -> str:
         f'serial_no="{settings.wechat_pay_merchant_serial_no}",'
         f'signature="{signature_text}"'
     )
+
+
+def verify_wechat_response(response: httpx.Response) -> None:
+    """Verify a successful WeChat Pay API v3 response signature."""
+
+    if settings.wechat_pay_mode != "prod":
+        return
+
+    if settings.wechat_platform_public_key_pem:
+        pem = settings.wechat_platform_public_key_pem.encode("utf-8")
+    elif settings.wechat_platform_public_key_path:
+        with open(settings.wechat_platform_public_key_path, "rb") as key_file:
+            pem = key_file.read()
+    else:
+        raise ValueError("WeChat platform public key is not configured")
+
+    timestamp = response.headers.get("Wechatpay-Timestamp", "")
+    nonce = response.headers.get("Wechatpay-Nonce", "")
+    signature = response.headers.get("Wechatpay-Signature", "")
+    if not timestamp or not nonce or not signature:
+        raise ValueError("WeChat Pay response signature headers are missing")
+
+    message = (
+        f"{timestamp}\n{nonce}\n".encode("utf-8")
+        + response.content
+        + b"\n"
+    )
+    public_key = load_pem_public_key(pem)
+    try:
+        public_key.verify(
+            base64.b64decode(signature),
+            message,
+            asy_padding.PKCS1v15(),
+            hashes.SHA256(),
+        )
+    except Exception as exc:
+        raise ValueError("Invalid WeChat Pay response signature") from exc
 
 
 def create_wechat_native_prepay(db: Session, *, order: Order) -> Payment:

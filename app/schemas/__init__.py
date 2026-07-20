@@ -13,7 +13,9 @@ from pydantic import BaseModel, Field
 class OrderStatus(str, Enum):
     CREATED = "CREATED"
     PAID = "PAID"
+    REFUNDING = "REFUNDING"
     CANCELED = "CANCELED"
+    PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED"
     REFUNDED = "REFUNDED"
 
 
@@ -28,6 +30,15 @@ class PayChannel(str, Enum):
     WECHAT_NATIVE = "WECHAT_NATIVE"
     ALIPAY_PC = "ALIPAY_PC"
     ALIPAY_H5 = "ALIPAY_H5"
+
+
+class RefundStatus(str, Enum):
+    CREATED = "CREATED"
+    PROCESSING = "PROCESSING"
+    SUCCESS = "SUCCESS"
+    CLOSED = "CLOSED"
+    ABNORMAL = "ABNORMAL"
+    FAILED = "FAILED"
 
 
 # =========================
@@ -82,6 +93,60 @@ class OrderOut(BaseModel):
     created_at: datetime
 
     model_config = dict(from_attributes=True)
+
+
+class AdminRefundCreate(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=256)
+
+
+class RefundOut(BaseModel):
+    id: int
+    order_id: int
+    user_id: int
+    out_refund_no: str
+    wechat_refund_id: Optional[str] = None
+    refund_cents: int
+    total_cents: int
+    currency: str
+    reason: Optional[str] = None
+    status: RefundStatus
+    requested_by: Optional[int] = None
+    requested_at: datetime
+    success_at: Optional[datetime] = None
+    failure_code: Optional[str] = None
+    failure_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = dict(from_attributes=True)
+
+
+class AdminOrderItem(BaseModel):
+    id: int
+    user_id: int
+    user_email: Optional[str] = None
+    user_phone: Optional[str] = None
+    user_nickname: Optional[str] = None
+    product_id: int
+    product_code: str
+    product_name: str
+    product_kind: str
+    amount_cents: int
+    currency: str
+    status: OrderStatus
+    out_trade_no: str
+    payment_channel: Optional[str] = None
+    transaction_id: Optional[str] = None
+    entitlement_trace: str
+    refund: Optional[RefundOut] = None
+    created_at: datetime
+
+
+class AdminOrderListOut(BaseModel):
+    items: List[AdminOrderItem]
+    total: int
+    page: int
+    page_size: int
 
 
 # =========================
