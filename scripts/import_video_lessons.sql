@@ -7,7 +7,7 @@ CREATE TEMPORARY TABLE tmp_video_lessons_import (
     duration_seconds INT NOT NULL,
     sort_order INT NOT NULL,
     PRIMARY KEY (slug)
-) CHARACTER SET utf8mb4;
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 INSERT INTO tmp_video_lessons_import
     (slug, title, source_url, duration_seconds, sort_order)
