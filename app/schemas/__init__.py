@@ -269,8 +269,12 @@ class VideoCourseOut(BaseModel):
 
 class VideoPlayOut(BaseModel):
     lesson_id: int
-    play_url: str
     provider: str
+    play_url: Optional[str] = None
+    appID: Optional[int] = None
+    fileID: Optional[str] = None
+    psign: Optional[str] = None
+    expires_at: Optional[int] = None
 
 
 class VideoProgressIn(BaseModel):

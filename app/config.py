@@ -125,6 +125,15 @@ class Settings(BaseSettings):
     tencent_captcha_app_secret: Optional[str] = None
 
     # -----------------------------
+    # Tencent Cloud VOD
+    # -----------------------------
+    tencent_vod_app_id: Optional[int] = None
+    tencent_vod_sub_app_id: Optional[int] = None
+    tencent_vod_play_key: Optional[str] = None
+    tencent_vod_play_sign_expire_seconds: int = 3600
+    tencent_vod_url_expire_seconds: int = 3600
+
+    # -----------------------------
     # SMTP Email
     # -----------------------------
     smtp_host: str = "smtp.qq.com"

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import User, VideoCourse, VideoLesson, VideoWatchProgress
 from app.services.membership_service import has_video_access
+from app.services.tencent_vod import build_player_signature
 
 
 def list_courses(db: Session) -> list[VideoCourse]:
@@ -46,6 +47,12 @@ def can_play_lesson(db: Session, *, lesson: VideoLesson, user: Optional[User]) -
 
 def get_play_url(lesson: VideoLesson) -> Optional[str]:
     return lesson.source_url
+
+
+def get_vod_play_info(lesson: VideoLesson) -> Optional[dict[str, str | int]]:
+    if lesson.provider != "vod" or not lesson.provider_video_id:
+        return None
+    return build_player_signature(file_id=lesson.provider_video_id)
 
 
 def upsert_progress(

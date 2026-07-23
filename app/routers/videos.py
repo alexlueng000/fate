@@ -7,6 +7,7 @@ from app.db import get_db, get_db_tx
 from app.deps import get_current_user, get_current_user_optional
 from app.models import User
 from app.schemas import VideoCourseOut, VideoLessonOut, VideoPlayOut, VideoProgressIn, VideoProgressOut
+from app.services.tencent_vod import VodConfigError
 from app.services import video_service
 
 router = APIRouter(prefix="/videos", tags=["videos"])
@@ -48,6 +49,18 @@ async def play_video_lesson(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=reason)
     if not allowed:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=reason)
+
+    if lesson.provider == "vod" and lesson.provider_video_id:
+        try:
+            vod_info = video_service.get_vod_play_info(lesson)
+        except VodConfigError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+        if not vod_info:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="VIDEO_SOURCE_NOT_CONFIGURED")
+        return VideoPlayOut(lesson_id=lesson.id, provider=lesson.provider, **vod_info)
 
     play_url = video_service.get_play_url(lesson)
     if not play_url:
