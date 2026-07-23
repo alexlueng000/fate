@@ -37,6 +37,9 @@ def build_player_signature(
     payload = {
         "appId": app_id,
         "fileId": str(file_id),
+        "contentInfo": {
+            "audioVideoType": "Original",
+        },
         "currentTimeStamp": now,
         "expireTimeStamp": sign_expire_at,
         "urlAccessInfo": {
