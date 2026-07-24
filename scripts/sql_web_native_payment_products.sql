@@ -17,17 +17,31 @@ INSERT INTO products (
 )
 VALUES
     (
+        'membership_basic_1990',
+        'subscription',
+        'monthly',
+        '基础版会员',
+        1990,
+        'CNY',
+        0,
+        30,
+        30,
+        '30 天基础会员权益，含 30 次八字对话、30 次六爻和会员课程。',
+        JSON_OBJECT('tier', 'basic', 'video_access', true),
+        true
+    ),
+    (
         'monthly_3990',
         'subscription',
         'monthly',
-        '月付会员',
+        '高级版会员',
         3990,
         'CNY',
         0,
         100,
         100,
-        '30 天会员权益，含 100 次八字对话和 100 次六爻。',
-        JSON_OBJECT('video_access', true),
+        '30 天高级会员权益，含 100 次八字对话、100 次六爻和会员课程。',
+        JSON_OBJECT('tier', 'premium', 'video_access', true),
         true
     ),
     (
@@ -59,7 +73,33 @@ ON DUPLICATE KEY UPDATE
 
 UPDATE products
 SET active = false
-WHERE code IN ('REPORT_UNLOCK', 'VIP_30D', 'basic_combo', 'premium_combo');
+WHERE (
+        kind = 'subscription'
+        AND code NOT IN ('membership_basic_1990', 'monthly_3990')
+    )
+   OR code IN ('REPORT_UNLOCK', 'VIP_30D', 'basic_combo', 'premium_combo');
+
+DELETE pg
+FROM product_grants AS pg
+INNER JOIN products AS p ON p.id = pg.product_id
+WHERE p.code IN ('membership_basic_1990', 'monthly_3990');
+
+INSERT INTO product_grants (product_id, quota_type, amount, valid_days)
+SELECT id, 'chat', 30, 30
+FROM products
+WHERE code = 'membership_basic_1990'
+UNION ALL
+SELECT id, 'liuyao_chat', 30, 30
+FROM products
+WHERE code = 'membership_basic_1990'
+UNION ALL
+SELECT id, 'chat', 100, 30
+FROM products
+WHERE code = 'monthly_3990'
+UNION ALL
+SELECT id, 'liuyao_chat', 100, 30
+FROM products
+WHERE code = 'monthly_3990';
 
 UPDATE user_quotas
 SET total_quota = 10,

@@ -17,7 +17,10 @@ router = APIRouter(prefix="/membership", tags=["membership"])
 @router.get("/plans", response_model=list[ProductDetailOut])
 def get_membership_plans(db: Session = Depends(get_db)) -> list[ProductDetailOut]:
     products = list_products(db, active_only=True)
-    return [p for p in products if p.kind == "subscription"]
+    return sorted(
+        (p for p in products if p.kind == "subscription"),
+        key=lambda product: (product.price_cents, product.id),
+    )
 
 
 @router.get("/topup-packages", response_model=list[ProductDetailOut])

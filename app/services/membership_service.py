@@ -59,7 +59,6 @@ def create_or_renew_membership_for_order(
                 select(UserMembership)
                 .where(
                     UserMembership.user_id == user_id,
-                    UserMembership.product_id == product.id,
                 )
                 .order_by(UserMembership.current_period_end.desc())
                 .limit(1)
@@ -74,7 +73,7 @@ def create_or_renew_membership_for_order(
         select(UserMembership)
         .where(
             UserMembership.user_id == user_id,
-            UserMembership.product_id == product.id,
+            UserMembership.status == "active",
             UserMembership.current_period_end > now,
         )
         .order_by(UserMembership.current_period_end.desc())
@@ -87,6 +86,8 @@ def create_or_renew_membership_for_order(
         grant_start = membership.current_period_end
         grant_end = grant_start + delta
         membership.status = "active"
+        # 会员只有一套状态；跨档购买时切换到新档位并顺延有效期。
+        membership.product_id = product.id
         membership.current_period_start = min(membership.current_period_start, now)
         membership.current_period_end = grant_end
         membership.order_id = order.id if order else membership.order_id
