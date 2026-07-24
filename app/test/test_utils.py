@@ -22,7 +22,7 @@ from lunar_python.eightchar import Yun
 # ====== 配置 ======
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions"
-DEEPSEEK_MODEL   = "deepseek-chat"
+DEEPSEEK_MODEL   = "deepseek-v4-flash"
 
 system_prompt = """
 # 角色

@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # -----------------------------
     deepseek_api_key: Optional[str] = None
     deepseek_api_url: str = "https://api.deepseek.com/chat/completions"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-v4-flash"
     deepseek_max_concurrent: int = 5
     deepseek_acquire_timeout: int = 20
     deepseek_retry_times: int = 3

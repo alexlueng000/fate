@@ -33,7 +33,7 @@ class ApiCallLog(Base):
         autoincrement=True,
     )
 
-    # 模型名称: deepseek-chat, deepseek-reasoner 等
+    # 模型名称: deepseek-v4-flash, deepseek-v4-pro 等
     model: Mapped[str] = mapped_column(
         String(64), nullable=False, comment="模型名称",
     )

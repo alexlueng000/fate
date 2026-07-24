@@ -754,7 +754,7 @@ def simplify_message(message_content: str, request: Request):
             try:
                 set_caller("simplify")
                 normalizer = utils.IncrementalNormalizer(normalize_interval=50)
-                for delta in call_deepseek_stream(messages, model="deepseek-chat"):
+                for delta in call_deepseek_stream(messages):
                     if not delta:
                         continue
                     clean = normalizer.append(delta)
@@ -771,7 +771,7 @@ def simplify_message(message_content: str, request: Request):
         return sse_response(gen)
 
     set_caller("simplify")
-    reply = normalize_markdown(call_deepseek(messages, model="deepseek-chat")).strip()
+    reply = normalize_markdown(call_deepseek(messages)).strip()
     reply = utils.scrub_br_block(reply)
     reply = utils.collapse_double_newlines(reply)
     reply = utils.third_sub(reply)

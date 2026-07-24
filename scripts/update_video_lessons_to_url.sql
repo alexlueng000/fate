@@ -39,7 +39,7 @@ JOIN (
     UNION ALL SELECT 'vod-5001834812993268502', 'https://1333221986.vod-qcloud.com/3421f9a8vodcq1333221986/578552e15001834812993268502/vZkhQAkrcQ4A.mp4'
 ) AS media ON media.slug = lesson.slug
 SET
-    lesson.provider = 'url',
+    lesson.provider = 'vod',
     lesson.provider_video_id = NULL,
     lesson.source_url = media.source_url,
     lesson.access_level = 'member',

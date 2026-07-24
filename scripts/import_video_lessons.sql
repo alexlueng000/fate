@@ -55,7 +55,7 @@ SET
     lesson.duration_seconds = media.duration_seconds,
     lesson.sort_order = media.sort_order,
     lesson.access_level = 'member',
-    lesson.provider = 'url',
+    lesson.provider = 'vod',
     lesson.provider_video_id = NULL,
     lesson.is_active = TRUE
 WHERE lesson.course_id = 1;
@@ -81,7 +81,7 @@ SELECT
     media.duration_seconds,
     media.sort_order,
     'member',
-    'url',
+    'vod',
     NULL,
     media.source_url,
     TRUE
