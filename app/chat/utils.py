@@ -16,6 +16,64 @@ from ..db import get_db
 
 _prompt_cache: Dict[str, Tuple[str, float]] = {}  # {key: (prompt, expiry_time)}
 _prompt_cache_lock = Lock()
+
+SUGGESTED_QUESTIONS_RULES = """
+
+【推荐追问输出协议 - 必须作为回复的最后一部分】
+每次回复都必须在正文之后生成 4 个与本轮内容直接相关的后续问题，并严格使用以下格式：
+
+---SUGGESTED_QUESTIONS---
+1. 问题文本1
+2. 问题文本2
+3. 问题文本3
+4. 问题文本4
+---END_SUGGESTED_QUESTIONS---
+
+要求：
+1. 两个英文标记必须逐字、完整输出，不能省略结束标记
+2. 这里的标记是“不使用分割线”规则的唯一例外
+3. 每个问题 15-30 个汉字，使用疑问句，并结合本轮具体分析
+4. 问题必须站在用户视角，是“用户接下来向你提问”的内容，优先使用“我、我的”
+5. 禁止生成向用户采集信息的反问，例如“您是否……”“目前是否……”“请问您……”
+6. 问题必须能由八字分析继续回答，不能询问用户的病史、症状、职业或生活习惯
+7. 健康相关问题只能讨论命理倾向和生活管理参考，不得索取病史或提供疾病诊断
+8. 标记之后不得再输出任何内容
+
+正确示例：
+1. 从命盘倾向看，我应重点关注哪些生活习惯？
+2. 未来三年我的事业发展重点是什么？
+3. 我的沟通方式在关系中有哪些优势？
+4. 当前阶段我该如何安排学习提升计划？
+
+错误示例：
+1. 您是否长期胃部不适？
+2. 目前是否有坚持运动？
+3. 请问您从事什么行业？
+"""
+
+_SUGGESTED_QUESTIONS_SECTION_RE = re.compile(
+    r"""
+    ^[ \t]*\#{1,6}[ \t]*(?:追问|推荐追问输出协议)[ \t]*\n
+    [\s\S]*?
+    (?=^[ \t]*\#{1,6}[ \t]+\S|\Z)
+    """,
+    re.MULTILINE | re.VERBOSE,
+)
+
+_SUGGESTED_QUESTIONS_BLOCK_RE = re.compile(
+    r"""
+    ^[ \t]*---[ \t]*SUGGESTED_QUESTIONS[ \t]*---[ \t]*\n
+    [\s\S]*?
+    ^[ \t]*---[ \t]*END_SUGGESTED_QUESTIONS[ \t]*---[ \t]*\n?
+    """,
+    re.MULTILINE | re.VERBOSE | re.IGNORECASE,
+)
+
+
+def strip_suggested_questions_rules(prompt: str) -> str:
+    """Remove legacy follow-up protocols before appending the canonical one."""
+    without_sections = _SUGGESTED_QUESTIONS_SECTION_RE.sub("", prompt or "")
+    return _SUGGESTED_QUESTIONS_BLOCK_RE.sub("", without_sections).strip()
 _PROMPT_CACHE_TTL = 300  # 5 minutes default TTL
 
 
@@ -64,7 +122,7 @@ def append_md_rules(prompt: str) -> str:
         "   - 列表项前不能有标题符号\n\n"
         "4. 其他要求：\n"
         "   - 段落之间空一行\n"
-        "   - 不要使用粗体**、斜体*、引用>、分割线---\n"
+        "   - 不要使用粗体**、斜体*、引用>、分割线---（推荐追问协议的两个英文标记除外）\n"
         "   - 强调时请使用全角括号【】\n"
         "   - 避免复杂嵌套\n"
     )
@@ -404,8 +462,13 @@ def build_full_system_prompt(
     Returns:
         Static system prompt ready for AI (same for all users → cache-friendly)
     """
-    composed = (base_prompt or "")
+    # The admin-managed prompt may still contain an older follow-up section.
+    # Remove it so the model receives exactly one canonical protocol, placed
+    # after every other formatting rule.
+    composed = strip_suggested_questions_rules(base_prompt or "")
     if kb_passages:
         kb_block = "\n\n".join(kb_passages[:3])
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
-    return append_md_rules(composed)
+    # Keep the single machine-readable follow-up protocol last so that later
+    # formatting instructions cannot accidentally override it.
+    return f"{append_md_rules(composed)}{SUGGESTED_QUESTIONS_RULES}"

@@ -662,10 +662,13 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     if history[-1]["role"] != "assistant":
         raise ValueError("最后一条不是 assistant，无法重生")
 
-    history.pop()  # 删除最后一条 assistant
+    # Do not mutate live history before the upstream request succeeds. Otherwise
+    # a timeout/error makes the original answer disappear from conversation
+    # context and the next retry fails with "最后一条不是 assistant".
+    retry_history = history[:-1]
 
     last_user_msg = None
-    for m in reversed(history):
+    for m in reversed(retry_history):
         if m["role"] == "user":
             last_user_msg = m["content"]
             break
@@ -680,9 +683,17 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         except Exception:
             kb_passages = []
 
-    composed = utils.build_full_system_prompt(
-        utils.load_system_prompt_from_db(), kb_passages
+    is_opening_report = (
+        len(retry_history) == 1
+        and retry_history[0].get("role") == "user"
+        and "我的命盘信息如下" in retry_history[0].get("content", "")
     )
+    base_prompt = (
+        utils.load_report_system_prompt_from_db()
+        if is_opening_report
+        else utils.load_system_prompt_from_db()
+    )
+    composed = utils.build_full_system_prompt(base_prompt, kb_passages)
 
     # 注入本命八字锚点：避免对话中出现多个八字时混淆
     paipan = conv.get("paipan") or {}
@@ -704,7 +715,7 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         composed = composed + bazi_anchor
 
     recentN = 10
-    trimmed_history = history[-recentN:]
+    trimmed_history = retry_history[-recentN:]
     messages = [{"role": "system", "content": composed}]
     messages.extend(trimmed_history)
 
@@ -726,7 +737,8 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         reply = normalize_markdown(reply)
     except Exception:
         pass
-    append_history(conversation_id, "assistant", reply)
+    # Replace the original assistant turn only after successful generation.
+    history[-1] = {"role": "assistant", "content": reply}
     return reply
 
 
