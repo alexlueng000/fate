@@ -146,7 +146,8 @@ def start_chat(
         with utils.timer("pre_build_prompt", spans):
             composed = utils.build_full_system_prompt(
                 base_prompt,
-                kb_passages
+                kb_passages,
+                paipan=paipan,
             )
 
         # 4）初始化会话、写入缓存耗时
@@ -341,10 +342,6 @@ def init_chat(
 
     注意：此函数用于 panel 页对话，使用通用 system_prompt（非 report_system_prompt）。
     """
-    # 读 system prompt - 使用通用对话提示词，而非报告页提示词
-    base_prompt = utils.load_system_prompt_from_db()
-    composed = utils.build_full_system_prompt(base_prompt, [])
-
     # 已登录用户从档案读命盘（若未传入 paipan）
     if user_id and db and not paipan:
         from app.models.profile import UserProfile
@@ -353,6 +350,10 @@ def init_chat(
             profile_id = profile.id
             bazi_chart = profile.bazi_chart
             paipan = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else {}
+
+    # 读 system prompt - 使用通用对话提示词，并注入命盘和实时日期
+    base_prompt = utils.load_system_prompt_from_db()
+    composed = utils.build_full_system_prompt(base_prompt, [], paipan=paipan)
 
     # 创建 DB 对话记录（已登录用户）
     db_conv_id: Optional[int] = None
@@ -440,7 +441,7 @@ def send_chat(
                             paipan = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else {}
 
                     base_prompt = utils.load_system_prompt_from_db()
-                    composed = utils.build_full_system_prompt(base_prompt, [])
+                    composed = utils.build_full_system_prompt(base_prompt, [], paipan=paipan)
 
                     # 从 DB 恢复历史消息，确保 AI 能看到之前的对话
                     db_msgs = (
@@ -503,11 +504,11 @@ def send_chat(
             kb_passages = []
 
     # 每次对话都从 DB 重新加载最新 system prompt，确保管理员改动立即生效
+    paipan = conv.get("paipan") or {}
     base_prompt = utils.load_system_prompt_from_db()
-    composed = utils.build_full_system_prompt(base_prompt, kb_passages)
+    composed = utils.build_full_system_prompt(base_prompt, kb_passages, paipan=paipan)
 
     # 注入本命八字锚点：避免对话中出现多个八字时混淆（如合盘、家人八字等）
-    paipan = conv.get("paipan") or {}
     if paipan and paipan.get("four_pillars"):
         fp = paipan["four_pillars"]
         bazi_anchor = (
@@ -693,10 +694,10 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         if is_opening_report
         else utils.load_system_prompt_from_db()
     )
-    composed = utils.build_full_system_prompt(base_prompt, kb_passages)
+    paipan = conv.get("paipan") or {}
+    composed = utils.build_full_system_prompt(base_prompt, kb_passages, paipan=paipan)
 
     # 注入本命八字锚点：避免对话中出现多个八字时混淆
-    paipan = conv.get("paipan") or {}
     if paipan and paipan.get("four_pillars"):
         fp = paipan["four_pillars"]
         bazi_anchor = (

@@ -246,7 +246,8 @@ async def websocket_chat(websocket: WebSocket):
             base_prompt = load_system_prompt_from_db()
             composed = build_full_system_prompt(
                 base_prompt,
-                kb_passages
+                kb_passages,
+                paipan=paipan,
             )
 
             # 保存会话

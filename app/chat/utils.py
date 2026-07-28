@@ -3,9 +3,11 @@ import json
 import os
 import re
 import time
+from datetime import datetime
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 from threading import Lock
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
@@ -148,6 +150,63 @@ def format_dayun(dy: List[Dict[str, Any]]) -> str:
         pillar = "".join(item["pillar"])
         lines.append(f"- 起始年龄 {item['age']}，起运年 {item['start_year']}，大运 {pillar}")
     return "\n".join(lines)
+
+
+def build_runtime_context(
+    paipan: Optional[Dict[str, Any]] = None,
+    current_dt: Optional[datetime] = None,
+) -> Dict[str, str]:
+    """Build deterministic chart and Shanghai-time values for prompt rendering."""
+    now = current_dt or datetime.now(ZoneInfo("Asia/Shanghai"))
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+    else:
+        now = now.astimezone(ZoneInfo("Asia/Shanghai"))
+
+    try:
+        # Keep this import lazy so prompt rendering can still start in lightweight
+        # environments where optional Bazi dependencies have not been installed.
+        from lunar_python import Solar
+
+        solar = Solar.fromYmdHms(
+            now.year, now.month, now.day, now.hour, now.minute, now.second
+        )
+        year_ganzhi = solar.getLunar().getYearInGanZhiByLiChun()
+    except ImportError:
+        stems = "甲乙丙丁戊己庚辛壬癸"
+        branches = "子丑寅卯辰巳午未申酉戌亥"
+        # Lightweight fallback. Production uses lunar_python above for the
+        # exact Li Chun boundary; Feb 4 is only used when that dependency is absent.
+        ganzhi_year = now.year if (now.month, now.day) >= (2, 4) else now.year - 1
+        year_ganzhi = (
+            stems[(ganzhi_year - 4) % 10] + branches[(ganzhi_year - 4) % 12]
+        )
+    chart = paipan or {}
+    four_pillars = chart.get("four_pillars") or {}
+    dayun = chart.get("dayun") or []
+
+    return {
+        "FOUR_PILLARS": (
+            format_four_pillars(four_pillars)
+            if all(four_pillars.get(key) for key in ("year", "month", "day", "hour"))
+            else "以本轮用户消息中的命盘信息为准"
+        ),
+        "DAYUN": format_dayun(dayun) if dayun else "以本轮用户消息中的大运信息为准",
+        "GENDER": str(chart.get("gender") or "以本轮用户消息中的性别信息为准"),
+        "CURRENT_YEAR_GANZHI": f"{now:%Y-%m-%d}，{now.year}年，{year_ganzhi}年",
+        "CURRENT_DATE": now.strftime("%Y-%m-%d"),
+        "CURRENT_YEAR": str(now.year),
+        "CURRENT_YEAR_GANZHI_ONLY": year_ganzhi,
+        "FUTURE_THREE_YEARS": f"{now.year}年、{now.year + 1}年、{now.year + 2}年",
+    }
+
+
+def render_prompt_placeholders(prompt: str, context: Dict[str, str]) -> str:
+    """Replace supported ``{{NAME}}`` placeholders without touching other text."""
+    rendered = prompt
+    for key, value in context.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", value)
+    return rendered
 
 
 # ===================== Database Utilities =====================
@@ -449,23 +508,38 @@ class IncrementalNormalizer:
 
 def build_full_system_prompt(
     base_prompt: str,
-    kb_passages: List[str]
+    kb_passages: List[str],
+    paipan: Optional[Dict[str, Any]] = None,
+    current_dt: Optional[datetime] = None,
 ) -> str:
     """
     由 DB 加载的 base_prompt，附加格式规则与 KB 片段。
-    命盘数据（四柱、大运、性别）已移至用户消息，此处不再填充占位符。
+    Fill chart/time placeholders and append the canonical runtime time anchor.
 
     Args:
         base_prompt: Base system prompt from database
         kb_passages: Retrieved knowledge base passages
 
     Returns:
-        Static system prompt ready for AI (same for all users → cache-friendly)
+        Fully rendered system prompt containing the current chart and time anchor
     """
     # The admin-managed prompt may still contain an older follow-up section.
     # Remove it so the model receives exactly one canonical protocol, placed
     # after every other formatting rule.
-    composed = strip_suggested_questions_rules(base_prompt or "")
+    runtime = build_runtime_context(paipan, current_dt)
+    composed = render_prompt_placeholders(
+        strip_suggested_questions_rules(base_prompt or ""), runtime
+    )
+    composed += (
+        "\n\n【当前时间锚点 - 涉及阶段分析时必须遵守】\n"
+        f"当前公历日期：{runtime['CURRENT_DATE']}\n"
+        f"当前公历年份：{runtime['CURRENT_YEAR']}年\n"
+        f"当前流年干支：{runtime['CURRENT_YEAR_GANZHI_ONLY']}\n"
+        f"未来三年固定指：{runtime['FUTURE_THREE_YEARS']}\n"
+        "凡出现“今年”“当前”“未来三年”“近三年”，均以上述日期为起点。\n"
+        "除非用户明确要求回顾过去，否则不得把当前年份以前的年份列入未来阶段。\n"
+        "分析阶段变化时，先核对对应年份的大运与流年，再给出判断。"
+    )
     if kb_passages:
         kb_block = "\n\n".join(kb_passages[:3])
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
