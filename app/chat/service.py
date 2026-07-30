@@ -235,14 +235,14 @@ def start_chat(
                 if not first_byte_seen:
                     spans["first_byte"] = time.perf_counter() - start_fb
 
-                yield sse_pack("[DONE]")
-
             except Exception as e:
                 logger.error("start_chat_stream_error", error=str(e))
-                yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
-                yield sse_pack("[DONE]")
+                final = "抱歉，AI 服务暂时不可用，请稍后再试。"
+                yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
 
-            finally:
+            # 必须在 [DONE] 之前持久化。客户端收到 [DONE] 后会主动结束读取，
+            # 若把保存放在生成器 finally 中，连接取消时会留下只有会话、没有消息的空记录。
+            try:
                 if "first_byte" in spans:
                     spans["streaming"] = time.perf_counter() - start_fb - spans["first_byte"]
 
@@ -260,8 +260,6 @@ def start_chat(
                                 _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
                                 assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
                                 logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id, assistant_msg_id=assistant_msg_id)
-                                # 发送包含 message_id 的元数据
-                                yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
                         except Exception as e:
                             logger.error("message_persist_failed", error=str(e), conversation_id=cid)
 
@@ -274,6 +272,12 @@ def start_chat(
                     kb_topk=kb_topk,
                     db_conv_id=db_conv_id
                 )
+            except Exception as e:
+                logger.error("chat_start_finalize_failed", error=str(e), conversation_id=cid)
+
+            if assistant_msg_id:
+                yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
+            yield sse_pack("[DONE]")
 
         return sse_response(gen)
 
@@ -572,12 +576,13 @@ def send_chat(
                 # Final normalization
                 final = normalizer.finalize()
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
-                yield sse_pack("[DONE]")
             except Exception as e:
                 logger.error("send_chat_stream_error", error=str(e))
-                yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
-                yield sse_pack("[DONE]")
-            finally:
+                final = "抱歉，AI 服务暂时不可用，请稍后再试。"
+                yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
+
+            # 与 start_chat 一致：先保存，再宣告流结束。
+            try:
                 append_history(conversation_id, "user", persisted_user_message)
                 append_history(conversation_id, "assistant", final)
 
@@ -591,10 +596,14 @@ def send_chat(
                             _save_db_message(new_db, db_conv_id, user_id, "user", persisted_user_message)
                             assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
                             logger.info("messages_persisted", conversation_id=conversation_id, assistant_msg_id=assistant_msg_id)
-                            # 发送包含 message_id 的元数据
-                            yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
                     except Exception as e:
                         logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
+            except Exception as e:
+                logger.error("chat_send_finalize_failed", error=str(e), conversation_id=conversation_id)
+
+            if assistant_msg_id:
+                yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
+            yield sse_pack("[DONE]")
 
         return sse_response(gen)
 
