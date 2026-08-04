@@ -157,6 +157,20 @@ def _conversation_type_query(
     return query
 
 
+def _has_displayable_assistant_message_query():
+    """Only show conversations that have saved assistant content."""
+    return (
+        select(Message.id)
+        .where(
+            Message.conversation_id == Conversation.id,
+            Message.role == "assistant",
+            func.length(func.trim(Message.content)) > 0,
+        )
+        .limit(1)
+        .exists()
+    )
+
+
 # ===== 路由 =====
 
 @router.get("", response_model=ConversationListResp)
@@ -168,7 +182,9 @@ def list_conversations(
     user_id: int = Depends(get_current_user_or_401),
 ):
     # 按类型过滤
-    base_q = _conversation_type_query(user_id, type)
+    base_q = _conversation_type_query(user_id, type).where(
+        _has_displayable_assistant_message_query()
+    )
 
     total = db.scalar(
         select(func.count()).select_from(base_q.subquery())
