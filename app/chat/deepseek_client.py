@@ -273,10 +273,14 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                         "status_code": response.status_code if response is not None else None,
                     },
                 )
-                if isinstance(last_exc, DeepSeekEmptyResponseError) and attempt < _RETRY_TIMES - 1:
+                # A successful HTTP response with no assistant content is not a
+                # transient transport failure. Retrying a reasoning-only response
+                # can consume the full token budget repeatedly before callers get
+                # a chance to apply their fallback strategy.
+                if _should_retry(response, attempt):
                     time.sleep(_retry_delay(response, attempt))
-                elif _should_retry(response, attempt):
-                    time.sleep(_retry_delay(response, attempt))
+                else:
+                    break
 
     raise last_exc
 
@@ -431,9 +435,13 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
 
             if has_yielded:
                 break
-            if isinstance(last_exc, DeepSeekEmptyResponseError) and attempt < _RETRY_TIMES - 1:
+            # Do not replay a complete reasoning-only stream. In particular, a
+            # 200 response ending with finish_reason=length will not improve by
+            # immediately sending the identical request again. Let the service
+            # layer choose its fallback instead.
+            if _should_retry(response, attempt):
                 time.sleep(_retry_delay(response, attempt))
-            elif _should_retry(response, attempt):
-                time.sleep(_retry_delay(response, attempt))
+            else:
+                break
 
     raise last_exc

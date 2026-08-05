@@ -1,0 +1,135 @@
+{
+  "cases": [
+    {
+      "case_id": "ordinary_cn_001",
+      "description": "普通中国公历案例，东八区中央经线，不发生经度修正",
+      "gender": "男",
+      "input": {
+        "calendar": "gregorian",
+        "local_datetime": "1993-03-09 07:00:00",
+        "timezone": "Asia/Shanghai",
+        "birthplace": "中国",
+        "longitude": 120.0,
+        "leap_month": false
+      },
+      "options": {
+        "use_true_solar_time": true,
+        "equation_of_time": false,
+        "day_boundary_rule": "00:00"
+      },
+      "expected": {
+        "adjusted_datetime": "1993-03-09 07:00:00"
+      },
+      "provenance": {
+        "status": "candidate",
+        "sources": ["seed-input-only"],
+        "reviewed_by": null,
+        "notes": "当前只验证时间不发生经度修正，四柱和大运等待独立来源核验。"
+      }
+    },
+    {
+      "case_id": "ordinary_cn_002",
+      "description": "普通中国公历女性案例",
+      "gender": "女",
+      "input": {
+        "calendar": "gregorian",
+        "local_datetime": "1988-08-18 14:30:00",
+        "timezone": "Asia/Shanghai",
+        "birthplace": "中国",
+        "longitude": 120.0,
+        "leap_month": false
+      },
+      "options": {
+        "use_true_solar_time": true,
+        "equation_of_time": false,
+        "day_boundary_rule": "00:00"
+      },
+      "expected": {
+        "adjusted_datetime": "1988-08-18 14:30:00"
+      },
+      "provenance": {
+        "status": "candidate",
+        "sources": ["seed-input-only"],
+        "notes": "四柱和大运等待独立来源核验。"
+      }
+    },
+    {
+      "case_id": "ordinary_cn_003",
+      "description": "普通中国公历上午案例",
+      "gender": "男",
+      "input": {
+        "calendar": "gregorian",
+        "local_datetime": "2000-10-01 09:15:00",
+        "timezone": "Asia/Shanghai",
+        "birthplace": "中国",
+        "longitude": 120.0,
+        "leap_month": false
+      },
+      "options": {
+        "use_true_solar_time": true,
+        "equation_of_time": false,
+        "day_boundary_rule": "00:00"
+      },
+      "expected": {
+        "adjusted_datetime": "2000-10-01 09:15:00"
+      },
+      "provenance": {
+        "status": "candidate",
+        "sources": ["seed-input-only"],
+        "notes": "四柱和大运等待独立来源核验。"
+      }
+    },
+    {
+      "case_id": "ordinary_cn_004",
+      "description": "普通中国公历晚间案例",
+      "gender": "女",
+      "input": {
+        "calendar": "gregorian",
+        "local_datetime": "1976-11-22 20:45:00",
+        "timezone": "Asia/Shanghai",
+        "birthplace": "中国",
+        "longitude": 120.0,
+        "leap_month": false
+      },
+      "options": {
+        "use_true_solar_time": true,
+        "equation_of_time": false,
+        "day_boundary_rule": "00:00"
+      },
+      "expected": {
+        "adjusted_datetime": "1976-11-22 20:45:00"
+      },
+      "provenance": {
+        "status": "candidate",
+        "sources": ["seed-input-only"],
+        "notes": "四柱和大运等待独立来源核验。"
+      }
+    },
+    {
+      "case_id": "ordinary_cn_005",
+      "description": "普通中国公历凌晨案例",
+      "gender": "男",
+      "input": {
+        "calendar": "gregorian",
+        "local_datetime": "2012-05-20 03:20:00",
+        "timezone": "Asia/Shanghai",
+        "birthplace": "中国",
+        "longitude": 120.0,
+        "leap_month": false
+      },
+      "options": {
+        "use_true_solar_time": true,
+        "equation_of_time": false,
+        "day_boundary_rule": "00:00"
+      },
+      "expected": {
+        "adjusted_datetime": "2012-05-20 03:20:00"
+      },
+      "provenance": {
+        "status": "candidate",
+        "sources": ["seed-input-only"],
+        "notes": "四柱和大运等待独立来源核验。"
+      }
+    }
+  ]
+}

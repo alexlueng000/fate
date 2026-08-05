@@ -13,3 +13,17 @@
 - `conversation_eval.py`：对话与 Agent 轨迹评测。
 
 评测代码不应依赖线上数据库，也不能在生产请求中同步执行。
+
+运行已核验的发布门禁案例：
+
+```bash
+python -m app.evals.chart_eval app/evals/datasets/chart/ordinary.json
+```
+
+显式运行尚未核验的候选案例：
+
+```bash
+python -m app.evals.chart_eval --include-candidates app/evals/datasets/chart/ordinary.json
+```
+
+`candidate` 和 `disputed` 默认不参与发布门禁。评测失败只生成差异报告，禁止自动覆盖期望值。

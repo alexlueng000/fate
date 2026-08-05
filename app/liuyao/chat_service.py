@@ -22,7 +22,12 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger
 from app.chat import utils
-from app.chat.deepseek_client import call_deepseek, call_deepseek_stream, set_caller
+from app.chat.deepseek_client import (
+    DeepSeekEmptyResponseError,
+    call_deepseek,
+    call_deepseek_stream,
+    set_caller,
+)
 from app.chat.markdown_utils import normalize_markdown
 from app.chat.rag import retrieve_kb
 from app.chat.sse import should_stream, sse_pack, sse_response
@@ -212,19 +217,28 @@ def start_liuyao_chat(
                     {"meta": {"conversation_id": cid}}, ensure_ascii=False
                 ))
                 set_caller("liuyao_chat_start")
-                for delta in call_deepseek_stream(messages):
-                    if not delta:
-                        continue
-                    delta_count += 1
-                    raw_char_count += len(delta)
-                    clean = normalizer.append(delta)
-                    if clean:
-                        clean_emit_count += 1
-                        clean_char_count = len(clean)
-                        yield sse_pack(json.dumps(
-                            {"text": clean, "replace": True}, ensure_ascii=False
-                        ))
-                final = normalizer.finalize()
+                try:
+                    for delta in call_deepseek_stream(messages):
+                        if not delta:
+                            continue
+                        delta_count += 1
+                        raw_char_count += len(delta)
+                        clean = normalizer.append(delta)
+                        if clean:
+                            clean_emit_count += 1
+                            clean_char_count = len(clean)
+                            yield sse_pack(json.dumps(
+                                {"text": clean, "replace": True}, ensure_ascii=False
+                            ))
+                    final = normalizer.finalize()
+                except DeepSeekEmptyResponseError as e:
+                    logger.warning(
+                        "liuyao_start_reasoning_only_stream_fallback",
+                        cid=cid,
+                        db_conv_id=db_conv_id,
+                        error=str(e),
+                    )
+                    final = _fallback_non_stream_reply(messages, "liuyao_chat_start")
                 if not final.strip():
                     logger.error(
                         "liuyao_start_empty_reply_diagnostics",
@@ -395,19 +409,29 @@ def _send_streaming_message(
                     {"meta": {"conversation_id": conversation_id}}, ensure_ascii=False
                 ))
                 set_caller(caller_tag)
-                for delta in call_deepseek_stream(messages):
-                    if not delta:
-                        continue
-                    delta_count += 1
-                    raw_char_count += len(delta)
-                    clean = normalizer.append(delta)
-                    if clean:
-                        clean_emit_count += 1
-                        clean_char_count = len(clean)
-                        yield sse_pack(json.dumps(
-                            {"text": clean, "replace": True}, ensure_ascii=False
-                        ))
-                final = normalizer.finalize()
+                try:
+                    for delta in call_deepseek_stream(messages):
+                        if not delta:
+                            continue
+                        delta_count += 1
+                        raw_char_count += len(delta)
+                        clean = normalizer.append(delta)
+                        if clean:
+                            clean_emit_count += 1
+                            clean_char_count = len(clean)
+                            yield sse_pack(json.dumps(
+                                {"text": clean, "replace": True}, ensure_ascii=False
+                            ))
+                    final = normalizer.finalize()
+                except DeepSeekEmptyResponseError as e:
+                    logger.warning(
+                        "liuyao_send_reasoning_only_stream_fallback",
+                        cid=conversation_id,
+                        db_conv_id=db_conv_id,
+                        caller_tag=caller_tag,
+                        error=str(e),
+                    )
+                    final = _fallback_non_stream_reply(messages, caller_tag)
                 if not final.strip():
                     logger.error(
                         "liuyao_send_empty_reply_diagnostics",
