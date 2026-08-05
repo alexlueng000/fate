@@ -44,6 +44,10 @@ class DeepSeekConfigError(RuntimeError):
     """Raised when required DeepSeek configuration is missing."""
 
 
+class DeepSeekEmptyResponseError(RuntimeError):
+    """Raised when DeepSeek returns 200 but no assistant content."""
+
+
 def set_caller(name: str):
     """Set the logical caller name for logging in the current thread."""
     _caller_var.name = name
@@ -212,7 +216,16 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                 data = response.json()
                 latency = time.perf_counter() - t0
                 usage = data.get("usage", {})
-                reply = data["choices"][0]["message"]["content"]
+                choices = data.get("choices") or []
+                first_choice = choices[0] if choices else {}
+                message = first_choice.get("message") or {}
+                reply = message.get("content") or ""
+                finish_reason = first_choice.get("finish_reason")
+                if not reply.strip():
+                    raise DeepSeekEmptyResponseError(
+                        f"empty non-stream response, finish_reason={finish_reason}, "
+                        f"message_keys={list(message.keys())}"
+                    )
                 _update_prompt_log(
                     prompt_log_path,
                     response={
@@ -220,6 +233,8 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                         "stream": False,
                         "attempt": attempt,
                         "reply_chars": len(reply or ""),
+                        "finish_reason": finish_reason,
+                        "message_keys": list(message.keys()),
                         "usage": usage,
                     },
                 )
@@ -255,9 +270,12 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                         "stream": False,
                         "attempt": attempt,
                         "error": str(e),
+                        "status_code": response.status_code if response is not None else None,
                     },
                 )
-                if _should_retry(response, attempt):
+                if isinstance(last_exc, DeepSeekEmptyResponseError) and attempt < _RETRY_TIMES - 1:
+                    time.sleep(_retry_delay(response, attempt))
+                elif _should_retry(response, attempt):
                     time.sleep(_retry_delay(response, attempt))
 
     raise last_exc
@@ -299,6 +317,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
             sse_line_count = 0
             content_chunk_count = 0
             content_char_count = 0
+            finish_reasons: List[str] = []
+            delta_keys_seen: set[str] = set()
 
             try:
                 with requests.post(
@@ -333,8 +353,12 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                             first_choice = choices[0] if choices else None
                             if not first_choice:
                                 continue
+                            finish_reason = first_choice.get("finish_reason")
+                            if finish_reason:
+                                finish_reasons.append(str(finish_reason))
 
                             delta = first_choice.get("delta") or {}
+                            delta_keys_seen.update(str(k) for k in delta.keys())
                             content = delta.get("content")
                             if content:
                                 content_chunk_count += 1
@@ -347,6 +371,11 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                             logger = get_logger("deepseek_client")
                             logger.warning(f"Failed to parse SSE chunk: {parse_err}, data: {data[:200]}")
                             continue
+                    if content_chunk_count == 0:
+                        raise DeepSeekEmptyResponseError(
+                            f"empty stream response, sse_line_count={sse_line_count}, "
+                            f"finish_reasons={finish_reasons}, delta_keys={sorted(delta_keys_seen)}"
+                        )
                 success = True
                 _update_prompt_log(
                     prompt_log_path,
@@ -357,6 +386,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         "sse_line_count": sse_line_count,
                         "content_chunk_count": content_chunk_count,
                         "content_char_count": content_char_count,
+                        "finish_reasons": finish_reasons,
+                        "delta_keys_seen": sorted(delta_keys_seen),
                         "usage": {
                             "prompt_tokens": prompt_tokens,
                             "completion_tokens": completion_tokens,
@@ -376,9 +407,12 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         "stream": True,
                         "attempt": attempt,
                         "error": error,
+                        "status_code": response.status_code if response is not None else None,
                         "sse_line_count": sse_line_count,
                         "content_chunk_count": content_chunk_count,
                         "content_char_count": content_char_count,
+                        "finish_reasons": finish_reasons,
+                        "delta_keys_seen": sorted(delta_keys_seen),
                     },
                 )
             finally:
@@ -397,7 +431,9 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
 
             if has_yielded:
                 break
-            if _should_retry(response, attempt):
+            if isinstance(last_exc, DeepSeekEmptyResponseError) and attempt < _RETRY_TIMES - 1:
+                time.sleep(_retry_delay(response, attempt))
+            elif _should_retry(response, attempt):
                 time.sleep(_retry_delay(response, attempt))
 
     raise last_exc
