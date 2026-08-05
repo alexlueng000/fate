@@ -89,8 +89,8 @@ def _should_retry(response: Optional[requests.Response], attempt: int) -> bool:
     return response.status_code in _RETRYABLE_STATUS_CODES
 
 
-def _log_prompt_to_file(messages: List[Dict[str, str]], model: str, caller: str):
-    """Write the outbound prompt to a local audit log."""
+def _write_prompt_log(messages: List[Dict[str, str]], model: str, caller: str) -> Optional[str]:
+    """Write one structured prompt audit log and return its path."""
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         safe_caller = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in caller)
@@ -110,28 +110,30 @@ def _log_prompt_to_file(messages: List[Dict[str, str]], model: str, caller: str)
         with open(log_path, "w", encoding="utf-8") as f:
             json.dump(log_data, f, ensure_ascii=False, indent=2)
 
-        txt_path = log_path.replace(".json", ".txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("=== DeepSeek API Call Log ===\n")
-            f.write(f"Timestamp: {log_data['timestamp']}\n")
-            f.write(f"Caller: {caller}\n")
-            f.write(f"Model: {model}\n")
-            f.write(f"Message Count: {len(messages)}\n")
-            f.write(f"Total Characters: {log_data['total_chars']}\n")
-            f.write(f"\n{'=' * 80}\n\n")
-
-            for i, msg in enumerate(messages, 1):
-                role = msg.get("role", "unknown")
-                content = msg.get("content", "")
-                f.write(f"[Message {i}] Role: {role}\n")
-                f.write(f"{'-' * 80}\n")
-                f.write(f"{content}\n")
-                f.write(f"\n{'=' * 80}\n\n")
+        return log_path
     except Exception as e:
         from app.core.logging import get_logger
 
         logger = get_logger("deepseek_client")
         logger.warning(f"Failed to write prompt log: {e}")
+        return None
+
+
+def _update_prompt_log(log_path: Optional[str], **updates):
+    """Append response diagnostics to the same prompt log file."""
+    if not log_path:
+        return
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        data.update(updates)
+        with open(log_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        from app.core.logging import get_logger
+
+        logger = get_logger("deepseek_client")
+        logger.warning(f"Failed to update prompt log: {e}")
 
 
 def _log_api_call(
@@ -185,7 +187,7 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
     use_model = model or DEEPSEEK_MODEL
     caller = _get_caller()
 
-    _log_prompt_to_file(messages, use_model, caller)
+    prompt_log_path = _write_prompt_log(messages, use_model, caller)
 
     payload = {
         "model": use_model,
@@ -210,6 +212,17 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                 data = response.json()
                 latency = time.perf_counter() - t0
                 usage = data.get("usage", {})
+                reply = data["choices"][0]["message"]["content"]
+                _update_prompt_log(
+                    prompt_log_path,
+                    response={
+                        "success": True,
+                        "stream": False,
+                        "attempt": attempt,
+                        "reply_chars": len(reply or ""),
+                        "usage": usage,
+                    },
+                )
                 _log_api_call(
                     model=use_model,
                     stream=False,
@@ -221,7 +234,7 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                     success=True,
                     attempt=attempt,
                 )
-                return data["choices"][0]["message"]["content"]
+                return reply
             except Exception as e:
                 latency = time.perf_counter() - t0
                 _log_api_call(
@@ -235,6 +248,15 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
                     error=str(e),
                 )
                 last_exc = e
+                _update_prompt_log(
+                    prompt_log_path,
+                    response={
+                        "success": False,
+                        "stream": False,
+                        "attempt": attempt,
+                        "error": str(e),
+                    },
+                )
                 if _should_retry(response, attempt):
                     time.sleep(_retry_delay(response, attempt))
 
@@ -251,7 +273,7 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
     use_model = model or DEEPSEEK_MODEL
     caller = _get_caller()
 
-    _log_prompt_to_file(messages, use_model, caller)
+    prompt_log_path = _write_prompt_log(messages, use_model, caller)
 
     payload = {
         "model": use_model,
@@ -274,6 +296,9 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
             prompt_cache_miss_tokens = 0
             error: Optional[str] = None
             response: Optional[requests.Response] = None
+            sse_line_count = 0
+            content_chunk_count = 0
+            content_char_count = 0
 
             try:
                 with requests.post(
@@ -294,6 +319,7 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                         data = line[5:].strip()
                         if not data or data == "[DONE]":
                             continue
+                        sse_line_count += 1
                         try:
                             obj = json.loads(data)
                             usage = obj.get("usage") or {}
@@ -311,6 +337,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                             delta = first_choice.get("delta") or {}
                             content = delta.get("content")
                             if content:
+                                content_chunk_count += 1
+                                content_char_count += len(content)
                                 has_yielded = True
                                 yield content
                         except Exception as parse_err:
@@ -320,10 +348,39 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
                             logger.warning(f"Failed to parse SSE chunk: {parse_err}, data: {data[:200]}")
                             continue
                 success = True
+                _update_prompt_log(
+                    prompt_log_path,
+                    response={
+                        "success": True,
+                        "stream": True,
+                        "attempt": attempt,
+                        "sse_line_count": sse_line_count,
+                        "content_chunk_count": content_chunk_count,
+                        "content_char_count": content_char_count,
+                        "usage": {
+                            "prompt_tokens": prompt_tokens,
+                            "completion_tokens": completion_tokens,
+                            "prompt_cache_hit_tokens": prompt_cache_hit_tokens,
+                            "prompt_cache_miss_tokens": prompt_cache_miss_tokens,
+                        },
+                    },
+                )
                 return
             except Exception as e:
                 error = str(e)
                 last_exc = e
+                _update_prompt_log(
+                    prompt_log_path,
+                    response={
+                        "success": False,
+                        "stream": True,
+                        "attempt": attempt,
+                        "error": error,
+                        "sse_line_count": sse_line_count,
+                        "content_chunk_count": content_chunk_count,
+                        "content_char_count": content_char_count,
+                    },
+                )
             finally:
                 _log_api_call(
                     model=use_model,

@@ -194,6 +194,10 @@ def start_liuyao_chat(
         def gen() -> Iterator[bytes]:
             normalizer = utils.IncrementalNormalizer(normalize_interval=50)
             final = ""
+            delta_count = 0
+            raw_char_count = 0
+            clean_emit_count = 0
+            clean_char_count = 0
             try:
                 yield sse_pack(json.dumps(
                     {"meta": {"conversation_id": cid}}, ensure_ascii=False
@@ -202,13 +206,29 @@ def start_liuyao_chat(
                 for delta in call_deepseek_stream(messages):
                     if not delta:
                         continue
+                    delta_count += 1
+                    raw_char_count += len(delta)
                     clean = normalizer.append(delta)
                     if clean:
+                        clean_emit_count += 1
+                        clean_char_count = len(clean)
                         yield sse_pack(json.dumps(
                             {"text": clean, "replace": True}, ensure_ascii=False
                         ))
                 final = normalizer.finalize()
                 if not final.strip():
+                    logger.error(
+                        "liuyao_start_empty_reply_diagnostics",
+                        cid=cid,
+                        db_conv_id=db_conv_id,
+                        delta_count=delta_count,
+                        raw_char_count=raw_char_count,
+                        clean_emit_count=clean_emit_count,
+                        last_clean_char_count=clean_char_count,
+                        final_char_count=len(final),
+                        message_count=len(messages),
+                        prompt_chars=sum(len(m.get("content", "")) for m in messages),
+                    )
                     raise RuntimeError("empty_liuyao_start_reply")
                 yield sse_pack(json.dumps(
                     {"text": final, "replace": True}, ensure_ascii=False
@@ -351,6 +371,10 @@ def _send_streaming_message(
         def gen() -> Iterator[bytes]:
             normalizer = utils.IncrementalNormalizer(normalize_interval=50)
             final = ""
+            delta_count = 0
+            raw_char_count = 0
+            clean_emit_count = 0
+            clean_char_count = 0
             try:
                 yield sse_pack(json.dumps(
                     {"meta": {"conversation_id": conversation_id}}, ensure_ascii=False
@@ -359,13 +383,30 @@ def _send_streaming_message(
                 for delta in call_deepseek_stream(messages):
                     if not delta:
                         continue
+                    delta_count += 1
+                    raw_char_count += len(delta)
                     clean = normalizer.append(delta)
                     if clean:
+                        clean_emit_count += 1
+                        clean_char_count = len(clean)
                         yield sse_pack(json.dumps(
                             {"text": clean, "replace": True}, ensure_ascii=False
                         ))
                 final = normalizer.finalize()
                 if not final.strip():
+                    logger.error(
+                        "liuyao_send_empty_reply_diagnostics",
+                        cid=conversation_id,
+                        db_conv_id=db_conv_id,
+                        caller_tag=caller_tag,
+                        delta_count=delta_count,
+                        raw_char_count=raw_char_count,
+                        clean_emit_count=clean_emit_count,
+                        last_clean_char_count=clean_char_count,
+                        final_char_count=len(final),
+                        message_count=len(messages),
+                        prompt_chars=sum(len(m.get("content", "")) for m in messages),
+                    )
                     raise RuntimeError("empty_liuyao_send_reply")
                 yield sse_pack(json.dumps(
                     {"text": final, "replace": True}, ensure_ascii=False
