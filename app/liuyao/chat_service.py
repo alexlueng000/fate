@@ -52,6 +52,15 @@ def _consume_success_quota(db: Session, user_id: int, conversation_id: str) -> N
         )
 
 
+def _fallback_non_stream_reply(messages: List[dict], caller_tag: str) -> str:
+    """Use non-streaming DeepSeek once when the streaming response contains no text."""
+    set_caller(f"{caller_tag}_fallback")
+    reply = _post_process(call_deepseek(messages))
+    if not reply.strip():
+        raise RuntimeError(f"empty_{caller_tag}_fallback_reply")
+    return reply
+
+
 def _parse_db_conversation_id(conversation_id: str) -> Optional[int]:
     """Extract the numeric DB conversation id from current and legacy ids."""
     raw_id = conversation_id
@@ -229,7 +238,13 @@ def start_liuyao_chat(
                         message_count=len(messages),
                         prompt_chars=sum(len(m.get("content", "")) for m in messages),
                     )
-                    raise RuntimeError("empty_liuyao_start_reply")
+                    final = _fallback_non_stream_reply(messages, "liuyao_chat_start")
+                    logger.info(
+                        "liuyao_start_fallback_non_stream_success",
+                        cid=cid,
+                        db_conv_id=db_conv_id,
+                        final_char_count=len(final),
+                    )
                 yield sse_pack(json.dumps(
                     {"text": final, "replace": True}, ensure_ascii=False
                 ))
@@ -407,7 +422,14 @@ def _send_streaming_message(
                         message_count=len(messages),
                         prompt_chars=sum(len(m.get("content", "")) for m in messages),
                     )
-                    raise RuntimeError("empty_liuyao_send_reply")
+                    final = _fallback_non_stream_reply(messages, caller_tag)
+                    logger.info(
+                        "liuyao_send_fallback_non_stream_success",
+                        cid=conversation_id,
+                        db_conv_id=db_conv_id,
+                        caller_tag=caller_tag,
+                        final_char_count=len(final),
+                    )
                 yield sse_pack(json.dumps(
                     {"text": final, "replace": True}, ensure_ascii=False
                 ))
