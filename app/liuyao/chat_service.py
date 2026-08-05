@@ -60,7 +60,7 @@ def _consume_success_quota(db: Session, user_id: int, conversation_id: str) -> N
 def _fallback_non_stream_reply(messages: List[dict], caller_tag: str) -> str:
     """Use non-streaming DeepSeek once when the streaming response contains no text."""
     set_caller(f"{caller_tag}_fallback")
-    reply = _post_process(call_deepseek(messages))
+    reply = _post_process(call_deepseek(messages, thinking=False))
     if not reply.strip():
         raise RuntimeError(f"empty_{caller_tag}_fallback_reply")
     return reply
@@ -218,7 +218,7 @@ def start_liuyao_chat(
                 ))
                 set_caller("liuyao_chat_start")
                 try:
-                    for delta in call_deepseek_stream(messages):
+                    for delta in call_deepseek_stream(messages, thinking=False):
                         if not delta:
                             continue
                         delta_count += 1
@@ -306,7 +306,7 @@ def start_liuyao_chat(
 
     # 一次性
     set_caller("liuyao_chat_start")
-    reply = _post_process(call_deepseek(messages))
+    reply = _post_process(call_deepseek(messages, thinking=False))
     if not reply.strip():
         raise ValueError("AI 服务返回为空，请重试")
     append_history(cid, "user", opening_user_msg)
@@ -410,7 +410,7 @@ def _send_streaming_message(
                 ))
                 set_caller(caller_tag)
                 try:
-                    for delta in call_deepseek_stream(messages):
+                    for delta in call_deepseek_stream(messages, thinking=False):
                         if not delta:
                             continue
                         delta_count += 1
@@ -495,7 +495,7 @@ def _send_streaming_message(
 
     # 一次性
     set_caller(caller_tag)
-    reply = _post_process(call_deepseek(messages))
+    reply = _post_process(call_deepseek(messages, thinking=False))
     if not reply.strip():
         raise ValueError("AI 服务返回为空，请重试")
     append_history(conversation_id, "user", persisted_user_msg)
@@ -584,7 +584,7 @@ def regenerate_liuyao_chat(
     _print_deepseek_payload("regenerate", messages)
 
     set_caller("liuyao_chat_regenerate")
-    reply = _post_process(call_deepseek(messages))
+    reply = _post_process(call_deepseek(messages, thinking=False))
 
     # 把最后一条 assistant 替换掉
     if last_user_idx + 1 < len(history) and history[last_user_idx + 1].get("role") == "assistant":

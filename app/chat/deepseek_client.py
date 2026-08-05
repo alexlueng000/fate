@@ -185,7 +185,12 @@ def _log_api_call(
     threading.Thread(target=_write, daemon=True).start()
 
 
-def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -> str:
+def call_deepseek(
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None,
+    *,
+    thinking: Optional[bool] = None,
+) -> str:
     api_key = _ensure_api_key()
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
     use_model = model or DEEPSEEK_MODEL
@@ -199,6 +204,8 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
         "temperature": 0.7,
         "max_tokens": 8192,
     }
+    if thinking is not None:
+        payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
 
     last_exc: Exception = RuntimeError("Unknown DeepSeek error")
     with _deepseek_slot():
@@ -285,7 +292,12 @@ def call_deepseek(messages: List[Dict[str, str]], model: Optional[str] = None) -
     raise last_exc
 
 
-def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = None) -> Iterator[str]:
+def call_deepseek_stream(
+    messages: List[Dict[str, str]],
+    model: Optional[str] = None,
+    *,
+    thinking: Optional[bool] = None,
+) -> Iterator[str]:
     """
     Yield incremental content from DeepSeek's OpenAI-compatible SSE response.
     Retries happen only before any content has been yielded to avoid duplicates.
@@ -305,6 +317,8 @@ def call_deepseek_stream(messages: List[Dict[str, str]], model: Optional[str] = 
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if thinking is not None:
+        payload["thinking"] = {"type": "enabled" if thinking else "disabled"}
 
     last_exc: Exception = RuntimeError("Unknown DeepSeek streaming error")
     with _deepseek_slot():
