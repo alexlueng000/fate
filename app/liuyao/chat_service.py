@@ -29,6 +29,7 @@ from app.chat.sse import should_stream, sse_pack, sse_response
 from app.chat.store import append_history, get_conv, set_conv
 from app.models.chat import Conversation, Message
 from app.models.liuyao import LiuyaoHexagram
+from app.services.quota import QuotaService
 
 from .prompts import (
     build_opening_user_message,
@@ -36,6 +37,19 @@ from .prompts import (
 )
 
 logger = get_logger("liuyao.chat")
+
+
+def _consume_success_quota(db: Session, user_id: int, conversation_id: str) -> None:
+    """Consume liuyao quota after a non-empty AI answer has been persisted."""
+    allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "liuyao_chat")
+    if not allowed:
+        logger.warning(
+            "liuyao_quota_consume_after_success_failed",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            detail=msg,
+            remaining=remaining,
+        )
 
 
 def _parse_db_conversation_id(conversation_id: str) -> Optional[int]:
@@ -194,6 +208,8 @@ def start_liuyao_chat(
                             {"text": clean, "replace": True}, ensure_ascii=False
                         ))
                 final = normalizer.finalize()
+                if not final.strip():
+                    raise RuntimeError("empty_liuyao_start_reply")
                 yield sse_pack(json.dumps(
                     {"text": final, "replace": True}, ensure_ascii=False
                 ))
@@ -206,25 +222,29 @@ def start_liuyao_chat(
                 ))
                 yield sse_pack("[DONE]")
             finally:
-                try:
-                    append_history(cid, "user", opening_user_msg)
-                    append_history(cid, "assistant", final)
-                except Exception as e:
-                    logger.warning("liuyao_append_history_failed", error=str(e))
+                if final.strip():
+                    try:
+                        append_history(cid, "user", opening_user_msg)
+                        append_history(cid, "assistant", final)
+                    except Exception as e:
+                        logger.warning("liuyao_append_history_failed", error=str(e))
 
-                try:
-                    from app.db import SessionLocal
-                    with SessionLocal() as new_db:
-                        latency = int(utils.now_ms() - t0)
-                        _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
-                        msg_id = _save_db_message(
-                            new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency
-                        )
-                        yield sse_pack(json.dumps(
-                            {"meta": {"message_id": msg_id}}, ensure_ascii=False
-                        ))
-                except Exception as e:
-                    logger.error("liuyao_persist_failed", error=str(e), cid=cid)
+                    try:
+                        from app.db import SessionLocal
+                        with SessionLocal() as new_db:
+                            latency = int(utils.now_ms() - t0)
+                            _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
+                            msg_id = _save_db_message(
+                                new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency
+                            )
+                            _consume_success_quota(new_db, user_id, cid)
+                            yield sse_pack(json.dumps(
+                                {"meta": {"message_id": msg_id}}, ensure_ascii=False
+                            ))
+                    except Exception as e:
+                        logger.error("liuyao_persist_failed", error=str(e), cid=cid)
+                else:
+                    logger.warning("liuyao_start_empty_reply_not_charged", cid=cid, db_conv_id=db_conv_id)
 
                 logger.info(
                     "liuyao_start_completed",
@@ -238,11 +258,14 @@ def start_liuyao_chat(
     # 一次性
     set_caller("liuyao_chat_start")
     reply = _post_process(call_deepseek(messages))
+    if not reply.strip():
+        raise ValueError("AI 服务返回为空，请重试")
     append_history(cid, "user", opening_user_msg)
     append_history(cid, "assistant", reply)
     latency = int(utils.now_ms() - t0)
     _save_db_message(db, db_conv_id, user_id, "user", opening_user_msg)
     _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
+    _consume_success_quota(db, user_id, cid)
     return cid, reply
 
 
@@ -342,6 +365,8 @@ def _send_streaming_message(
                             {"text": clean, "replace": True}, ensure_ascii=False
                         ))
                 final = normalizer.finalize()
+                if not final.strip():
+                    raise RuntimeError("empty_liuyao_send_reply")
                 yield sse_pack(json.dumps(
                     {"text": final, "replace": True}, ensure_ascii=False
                 ))
@@ -354,38 +379,45 @@ def _send_streaming_message(
                 ))
                 yield sse_pack("[DONE]")
             finally:
-                try:
-                    append_history(conversation_id, "user", persisted_user_msg)
-                    append_history(conversation_id, "assistant", final)
-                except Exception as e:
-                    logger.warning("liuyao_append_history_failed", error=str(e))
-
-                if db_conv_id:
+                if final.strip():
                     try:
-                        from app.db import SessionLocal
-                        with SessionLocal() as new_db:
-                            latency = int(utils.now_ms() - t0)
-                            _save_db_message(new_db, db_conv_id, user_id, "user", persisted_user_msg)
-                            msg_id = _save_db_message(
-                                new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency
-                            )
-                            yield sse_pack(json.dumps(
-                                {"meta": {"message_id": msg_id}}, ensure_ascii=False
-                            ))
+                        append_history(conversation_id, "user", persisted_user_msg)
+                        append_history(conversation_id, "assistant", final)
                     except Exception as e:
-                        logger.error("liuyao_persist_failed", error=str(e), cid=conversation_id)
+                        logger.warning("liuyao_append_history_failed", error=str(e))
+
+                    if db_conv_id:
+                        try:
+                            from app.db import SessionLocal
+                            with SessionLocal() as new_db:
+                                latency = int(utils.now_ms() - t0)
+                                _save_db_message(new_db, db_conv_id, user_id, "user", persisted_user_msg)
+                                msg_id = _save_db_message(
+                                    new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency
+                                )
+                                _consume_success_quota(new_db, user_id, conversation_id)
+                                yield sse_pack(json.dumps(
+                                    {"meta": {"message_id": msg_id}}, ensure_ascii=False
+                                ))
+                        except Exception as e:
+                            logger.error("liuyao_persist_failed", error=str(e), cid=conversation_id)
+                else:
+                    logger.warning("liuyao_send_empty_reply_not_charged", cid=conversation_id, db_conv_id=db_conv_id)
 
         return sse_response(gen)
 
     # 一次性
     set_caller(caller_tag)
     reply = _post_process(call_deepseek(messages))
+    if not reply.strip():
+        raise ValueError("AI 服务返回为空，请重试")
     append_history(conversation_id, "user", persisted_user_msg)
     append_history(conversation_id, "assistant", reply)
     if db_conv_id:
         latency = int(utils.now_ms() - t0)
         _save_db_message(db, db_conv_id, user_id, "user", persisted_user_msg)
         _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
+        _consume_success_quota(db, user_id, conversation_id)
     return reply
 
 

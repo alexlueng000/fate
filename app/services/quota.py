@@ -100,6 +100,30 @@ class QuotaService:
         return True, f"剩余 {new_remaining} 次", new_remaining
 
     @staticmethod
+    def check_available(
+        db: Session,
+        user_id: int,
+        quota_type: str = "chat",
+        amount: int = 1
+    ) -> Tuple[bool, str, int]:
+        """
+        Check quota without consuming it.
+        Use this before AI generation; consume only after a non-empty answer is saved.
+        """
+        quota = QuotaService.get_or_create_quota(db, user_id, quota_type)
+
+        QuotaService.reset_quota_if_needed(db, quota)
+
+        if quota.total_quota == -1:
+            return True, "无限制", -1
+
+        remaining = quota.total_quota - quota.used_quota
+        if remaining < amount:
+            return False, f"配额不足，剩余 {remaining} 次", remaining
+
+        return True, f"剩余 {remaining} 次", remaining
+
+    @staticmethod
     def reset_quota_if_needed(db: Session, quota: UserQuota) -> None:
         """
         根据 period 重置配额
