@@ -17,7 +17,7 @@ from app.routers import (
     invitation_codes, sensitive_words, feedback, admin_stats, user_stats,
     message_rating, quota, products, orders, payments, webhooks, profile, admin_products,
     emotion, liuyao, conversations, career_progress, relationship_progress, events,
-    membership, videos,
+    membership, videos, guest_analysis,
     admin_refunds,
 )
 
@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
 
     # 用户行为埋点
     app.include_router(events.router, prefix="/api", tags=["events"])
+    app.include_router(guest_analysis.router, prefix="/api", tags=["guest-analysis"])
 
     @app.get("/api/ping")
     def ping():

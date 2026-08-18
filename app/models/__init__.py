@@ -24,6 +24,7 @@ from .liuyao import LiuyaoHexagram
 from .career_progress import CareerProgress
 from .relationship_progress import RelationshipProgress
 from .user_event import UserEvent
+from .guest_analysis import GuestAnalysis
 
 
 __all__ = [
@@ -59,4 +60,5 @@ __all__ = [
     "CareerProgress",
     "RelationshipProgress",
     "UserEvent",
+    "GuestAnalysis",
 ]

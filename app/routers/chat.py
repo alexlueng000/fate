@@ -1,11 +1,12 @@
 # app/chat/router.py
+from datetime import datetime
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from ..db import get_db, get_db_tx
 from ..deps import get_current_user_optional
-from ..models import User
+from ..models import GuestAnalysis, User
 from ..models.profile import UserProfile
 from ..services.quota import QuotaService
 from app.schemas.chat import (
@@ -20,6 +21,17 @@ import json
 
 logger = get_logger("chat.router")
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+
+def _extract_mingpan(payload: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return None
+    mingpan = payload.get("mingpan", payload)
+    if not isinstance(mingpan, dict):
+        return None
+    if not mingpan.get("four_pillars") or not mingpan.get("dayun"):
+        return None
+    return mingpan
 
 @router.post("/init", response_model=ChatInitResp)
 def chat_init(
@@ -55,14 +67,45 @@ def chat_start(
     # 已登录用户：从档案读取命盘
     if user_id:
         profile = db.query(UserProfile).filter_by(user_id=user_id).first()
-        if not profile:
-            raise HTTPException(status_code=400, detail="请先完善个人档案")
 
-        profile_id = profile.id
-        # 解包 mingpan 层（数据库中保存的格式是 {"mingpan": {...}}）
-        bazi_chart = profile.bazi_chart
-        paipan_data = bazi_chart.get("mingpan", bazi_chart) if isinstance(bazi_chart, dict) else bazi_chart
-        logger.info("chat_start_with_profile", user_id=user_id, profile_id=profile_id)
+        if req.guest_analysis_public_id:
+            analysis = (
+                db.query(GuestAnalysis)
+                .filter(
+                    GuestAnalysis.public_id == req.guest_analysis_public_id,
+                    GuestAnalysis.user_id == user_id,
+                )
+                .first()
+            )
+            if not analysis:
+                raise HTTPException(status_code=404, detail="游客分析不存在或尚未保存到当前账户")
+            if analysis.status != "succeeded":
+                raise HTTPException(status_code=400, detail="游客分析尚未生成完成")
+            if analysis.expires_at and analysis.expires_at < datetime.utcnow():
+                raise HTTPException(status_code=400, detail="游客分析已过期")
+
+            mingpan = _extract_mingpan(analysis.bazi_result)
+            if not mingpan:
+                raise HTTPException(status_code=400, detail="游客分析缺少可继续追问的命盘数据")
+
+            paipan_data = mingpan
+            if profile and profile.bazi_chart == analysis.bazi_result:
+                profile_id = profile.id
+            logger.info(
+                "chat_start_with_guest_analysis",
+                user_id=user_id,
+                public_id=req.guest_analysis_public_id,
+                profile_id=profile_id,
+            )
+        else:
+            if not profile:
+                raise HTTPException(status_code=400, detail="请先完善个人档案")
+
+            profile_id = profile.id
+            # 解包 mingpan 层（数据库中保存的格式是 {"mingpan": {...}}）
+            bazi_chart = profile.bazi_chart
+            paipan_data = _extract_mingpan(bazi_chart) or {}
+            logger.info("chat_start_with_profile", user_id=user_id, profile_id=profile_id)
 
         # 配额检查
         allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "chat")

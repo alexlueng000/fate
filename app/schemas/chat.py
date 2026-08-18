@@ -57,6 +57,7 @@ class PaipanPayload(BaseModel):
 
 class ChatStartReq(BaseModel):
     paipan: Optional[PaipanPayload] = None
+    guest_analysis_public_id: Optional[str] = None
     kb_index_dir: Optional[str] = None
     kb_topk: int = 0
     note: Optional[str] = None
