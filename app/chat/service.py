@@ -148,6 +148,7 @@ def start_chat(
                 base_prompt,
                 kb_passages,
                 paipan=paipan,
+                include_suggested_questions=False,  # 报告是一次性全量解读，不生成追问
             )
 
         # 4）初始化会话、写入缓存耗时
@@ -704,7 +705,12 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         else utils.load_system_prompt_from_db()
     )
     paipan = conv.get("paipan") or {}
-    composed = utils.build_full_system_prompt(base_prompt, kb_passages, paipan=paipan)
+    composed = utils.build_full_system_prompt(
+        base_prompt,
+        kb_passages,
+        paipan=paipan,
+        include_suggested_questions=not is_opening_report,  # 报告重生成不需要追问
+    )
 
     # 注入本命八字锚点：避免对话中出现多个八字时混淆
     if paipan and paipan.get("four_pillars"):

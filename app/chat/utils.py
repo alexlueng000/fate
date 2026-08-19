@@ -511,6 +511,7 @@ def build_full_system_prompt(
     kb_passages: List[str],
     paipan: Optional[Dict[str, Any]] = None,
     current_dt: Optional[datetime] = None,
+    include_suggested_questions: bool = True,
 ) -> str:
     """
     由 DB 加载的 base_prompt，附加格式规则与 KB 片段。
@@ -545,4 +546,7 @@ def build_full_system_prompt(
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
     # Keep the single machine-readable follow-up protocol last so that later
     # formatting instructions cannot accidentally override it.
-    return f"{append_md_rules(composed)}{SUGGESTED_QUESTIONS_RULES}"
+    # Skip it for one-shot reports (the report page has its own CTA flow).
+    if include_suggested_questions:
+        return f"{append_md_rules(composed)}{SUGGESTED_QUESTIONS_RULES}"
+    return append_md_rules(composed)
