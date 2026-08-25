@@ -92,6 +92,39 @@ def _hexagram_payload(hexagram: LiuyaoHexagram) -> dict:
     return HexagramDetailResponse.model_validate(hexagram).model_dump(mode="json")
 
 
+@router.post("/paipan", response_model=HexagramDetailResponse)
+def create_guest_liuyao_paipan(
+    data: GuestLiuyaoStartRequest,
+):
+    guest_session_id = data.guest_session_id.strip()
+    if len(guest_session_id) < 8 or len(guest_session_id) > 64:
+        raise HTTPException(status_code=400, detail="guest_session_id 无效")
+
+    if data.method not in ["number", "coin", "time"]:
+        raise HTTPException(status_code=400, detail="起卦方式必须是 number/coin/time")
+    if data.method == "number" and (not data.numbers or len(data.numbers) != 3):
+        raise HTTPException(status_code=400, detail="数字起卦需要提供3个数字")
+
+    timestamp = datetime.fromisoformat(data.timestamp) if data.timestamp else datetime.now()
+
+    try:
+        paipan = LiuyaoPaipan(
+            question=data.question,
+            method=data.method,
+            gender=data.gender,
+            timestamp=timestamp,
+            location=data.location,
+            solar_time=data.solar_time,
+            numbers=data.numbers,
+        )
+        paipan_result = paipan.calc()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"排盘失败: {str(exc)}")
+
+    transient_hexagram = _build_transient_hexagram(data, timestamp, paipan_result)
+    return _hexagram_payload(transient_hexagram)
+
+
 @router.post("/start")
 def start_guest_liuyao(
     data: GuestLiuyaoStartRequest,
