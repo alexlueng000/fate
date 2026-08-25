@@ -25,6 +25,7 @@ from .career_progress import CareerProgress
 from .relationship_progress import RelationshipProgress
 from .user_event import UserEvent
 from .guest_analysis import GuestAnalysis
+from .guest_liuyao import GuestLiuyao
 
 
 __all__ = [
@@ -61,4 +62,5 @@ __all__ = [
     "RelationshipProgress",
     "UserEvent",
     "GuestAnalysis",
+    "GuestLiuyao",
 ]
