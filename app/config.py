@@ -121,6 +121,8 @@ class Settings(BaseSettings):
     # Captcha (Tencent Cloud)
     # -----------------------------
     captcha_enabled: bool = True  # 开发环境可设为 False 跳过验证码
+    tencent_captcha_secret_id: Optional[str] = None
+    tencent_captcha_secret_key: Optional[str] = None
     tencent_captcha_app_id: Optional[str] = None
     tencent_captcha_app_secret: Optional[str] = None
 
