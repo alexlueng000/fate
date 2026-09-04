@@ -85,7 +85,7 @@ class TencentSMSService:
             req.SmsSdkAppId = self.app_id
             req.SignName = self.sign
             req.TemplateId = self.template_id
-            req.TemplateParamSet = [code, "5"]  # code, expire_minutes
+            req.TemplateParamSet = [code]
             req.PhoneNumberSet = [f"+86{phone}"]
 
             # Send SMS
