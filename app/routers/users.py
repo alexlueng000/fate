@@ -63,6 +63,7 @@ class UserOut(BaseModel):
     id: int
     email: str | None = None
     username: str | None = None  # 改为可选，兼容历史数据
+    phone: str | None = None
     nickname: str | None = None
     avatar_url: str | None = None
     is_admin: bool
@@ -225,14 +226,14 @@ async def mp_login(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) ->
 # ================================== 兼容旧接口（保留原 /auth/login） ==================================
 
 @router.post("/auth/login", response_model=AuthResponse, deprecated=True)
-def login_compat(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
+async def login_compat(payload: MpLoginRequest, db: Session = Depends(get_db_tx)) -> AuthResponse:
     """
     兼容旧接口：保留原 /auth/login 行为（openid 或 js_code=dev）。
     建议前端逐步迁移到：
       - Web：/auth/web/login
       - 小程序：/auth/mp/login
     """
-    return mp_login(payload, db)  # 直接复用小程序逻辑
+    return await mp_login(payload, db)  # 直接复用小程序逻辑
 
 
 # ================================== 当前用户信息 ==================================
@@ -297,11 +298,10 @@ from app.schemas.phone_auth import (
     PhoneSendCodeRequest,
     PhoneSendCodeResponse,
     PhoneLoginRequest,
-    PhoneLoginResponse,
 )
 from app.services.phone_verification import (
     generate_code,
-    can_send_code as can_send_phone_code,
+    can_send_code_with_limits,
     save_verification_code,
     verify_code as verify_phone_code,
     validate_china_phone,
@@ -311,6 +311,7 @@ from app.services.captcha import create_captcha_service
 from app.chat.store import _get_redis
 
 
+@router.post("/auth/sms/send", response_model=PhoneSendCodeResponse)
 @router.post("/auth/phone/send-code", response_model=PhoneSendCodeResponse)
 async def send_phone_verification_code(
     request: Request,
@@ -365,7 +366,13 @@ async def send_phone_verification_code(
         )
 
     # Check rate limits
-    can_send, error_msg = can_send_phone_code(redis, phone, client_ip)
+    can_send, error_msg = can_send_code_with_limits(
+        redis,
+        phone,
+        client_ip,
+        phone_cooldown_seconds=settings.sms_rate_limit_seconds,
+        daily_limit=settings.sms_daily_limit,
+    )
     if not can_send:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -382,7 +389,8 @@ async def send_phone_verification_code(
         code=code,
         ip_address=client_ip,
         purpose=payload.purpose,
-        expire_seconds=settings.sms_code_expire_minutes * 60
+        expire_seconds=settings.sms_code_expire_minutes * 60,
+        phone_cooldown_seconds=settings.sms_rate_limit_seconds,
     )
 
     # Send SMS
@@ -403,6 +411,7 @@ async def send_phone_verification_code(
     )
 
 
+@router.post("/auth/sms/login", response_model=AuthResponse)
 @router.post("/auth/phone/login", response_model=AuthResponse)
 def login_with_phone(
     request: Request,

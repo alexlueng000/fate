@@ -33,6 +33,20 @@ def can_send_code(redis: Redis, phone: str, ip_address: str) -> Tuple[bool, Opti
     Returns:
         (can_send: bool, error_message: Optional[str])
     """
+    return can_send_code_with_limits(redis, phone, ip_address)
+
+
+def can_send_code_with_limits(
+    redis: Redis,
+    phone: str,
+    ip_address: str,
+    *,
+    phone_cooldown_seconds: int = 60,
+    daily_limit: int = 10,
+    ip_window_seconds: int = 60,
+    ip_window_limit: int = 3,
+) -> Tuple[bool, Optional[str]]:
+    """Check whether a phone code can be sent with configurable limits."""
     # 1. Check phone rate limit
     rate_key = f"phone:ratelimit:{phone}"
     if redis.exists(rate_key):
@@ -42,7 +56,7 @@ def can_send_code(redis: Redis, phone: str, ip_address: str) -> Tuple[bool, Opti
     # 2. Check IP rate limit
     ip_key = f"phone:ratelimit:ip:{ip_address}"
     ip_count = redis.get(ip_key)
-    if ip_count and int(ip_count) >= 3:
+    if ip_count and int(ip_count) >= ip_window_limit:
         ttl = redis.ttl(ip_key)
         return False, f"该 IP 请求过于频繁，请 {ttl} 秒后重试"
 
@@ -50,8 +64,8 @@ def can_send_code(redis: Redis, phone: str, ip_address: str) -> Tuple[bool, Opti
     today = datetime.now().strftime("%Y%m%d")
     daily_key = f"phone:daily:{phone}:{today}"
     daily_count = redis.get(daily_key)
-    if daily_count and int(daily_count) >= 10:
-        return False, "今日请求次数已达上限（10次），请明天再试"
+    if daily_count and int(daily_count) >= daily_limit:
+        return False, f"今日请求次数已达上限（{daily_limit}次），请明天再试"
 
     return True, None
 
@@ -62,7 +76,9 @@ def save_verification_code(
     code: str,
     ip_address: str,
     purpose: str = "login",
-    expire_seconds: int = 300
+    expire_seconds: int = 300,
+    phone_cooldown_seconds: int = 60,
+    ip_window_seconds: int = 60,
 ) -> None:
     """
     Save verification code to Redis and update rate limit counters
@@ -83,14 +99,14 @@ def save_verification_code(
     attempts_key = f"phone:attempts:{phone}:{purpose}"
     redis.setex(attempts_key, expire_seconds, 0)
 
-    # Set phone rate limit (60 seconds)
+    # Set phone rate limit
     rate_key = f"phone:ratelimit:{phone}"
-    redis.setex(rate_key, 60, int(time.time()))
+    redis.setex(rate_key, phone_cooldown_seconds, int(time.time()))
 
-    # Increment IP counter (60 seconds)
+    # Increment IP counter
     ip_key = f"phone:ratelimit:ip:{ip_address}"
     redis.incr(ip_key)
-    redis.expire(ip_key, 60)
+    redis.expire(ip_key, ip_window_seconds)
 
     # Increment daily counter (24 hours)
     today = datetime.now().strftime("%Y%m%d")
