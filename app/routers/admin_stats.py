@@ -23,6 +23,7 @@ from app.deps import get_admin_user
 from app.models import User
 from app.models.chat import Conversation, Message
 from app.models.feedback import Feedback
+from app.models.order import Order
 from app.models.quota import UserQuota
 from app.models.usage_log import UsageLog
 from app.services.quota import QuotaService
@@ -81,6 +82,53 @@ async def get_overview(
         Feedback.status == "pending"
     ).scalar() or 0
 
+    # 产品核心转化指标。分母为 0 时返回 0，避免前端出现不可解释的空值。
+    new_user_cutoff = datetime.now() - timedelta(days=30)
+    new_users = db.query(func.count(User.id)).filter(
+        User.created_at >= new_user_cutoff
+    ).scalar() or 0
+    activated_new_users = db.query(func.count(func.distinct(User.id))).join(
+        Conversation, Conversation.user_id == User.id
+    ).filter(User.created_at >= new_user_cutoff).scalar() or 0
+
+    conversations_with_user_messages = db.query(
+        Message.conversation_id
+    ).filter(Message.role == "user").group_by(Message.conversation_id).subquery()
+    conversations_with_followup = db.query(
+        Message.conversation_id
+    ).filter(Message.role == "user").group_by(Message.conversation_id).having(
+        func.count(Message.id) >= 2
+    ).subquery()
+    interpreted_conversations = db.query(func.count()).select_from(
+        conversations_with_user_messages
+    ).scalar() or 0
+    followed_up_conversations = db.query(func.count()).select_from(
+        conversations_with_followup
+    ).scalar() or 0
+
+    # 只统计已完整度过 7 日观察窗的近 30 日 cohort；第 2-7 天有消息即视为复访。
+    cohort_start = datetime.now() - timedelta(days=37)
+    cohort_end = datetime.now() - timedelta(days=7)
+    eligible_users = db.query(User.id, User.created_at).filter(
+        User.created_at >= cohort_start,
+        User.created_at < cohort_end,
+    ).all()
+    retained_users = 0
+    for user_id, created_at in eligible_users:
+        returned = db.query(Message.id).filter(
+            Message.user_id == user_id,
+            Message.created_at >= created_at + timedelta(days=1),
+            Message.created_at < created_at + timedelta(days=8),
+        ).first()
+        retained_users += int(returned is not None)
+
+    paid_users = db.query(func.count(func.distinct(Order.user_id))).filter(
+        Order.status == "PAID"
+    ).scalar() or 0
+
+    def rate(numerator: int, denominator: int) -> float:
+        return round(numerator * 100 / denominator, 2) if denominator else 0.0
+
     return {
         "users": {
             "total": total_users,
@@ -101,6 +149,18 @@ async def get_overview(
         },
         "feedbacks": {
             "pending": pending_feedbacks
+        },
+        "rates": {
+            "new_user_activation": rate(activated_new_users, new_users),
+            "first_read_followup": rate(followed_up_conversations, interpreted_conversations),
+            "retention_7d": rate(retained_users, len(eligible_users)),
+            "paid_conversion": rate(paid_users, total_users),
+            "samples": {
+                "new_users": new_users,
+                "interpreted_conversations": interpreted_conversations,
+                "retention_cohort": len(eligible_users),
+                "paid_users": paid_users,
+            }
         }
     }
 
