@@ -4,17 +4,20 @@
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
+from uuid import uuid4
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from sqlalchemy import select, func
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import get_current_user_or_401
 from app.models.chat import Conversation, Message
+from app.models.conversation_digest import ConversationDigest
+from app.services.conversation_digest import generate_digest
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -28,6 +31,18 @@ class HexagramSummary(BaseModel):
     question: str
 
 
+class DigestResponse(BaseModel):
+    title: Optional[str] = None
+    custom_title: Optional[str] = None
+    topic: Optional[str] = None
+    question: Optional[str] = None
+    summary: Optional[str] = None
+    status: str = "empty"
+    source_message_id: int = 0
+    generated_at: Optional[datetime] = None
+    stale: bool = False
+
+
 class ConversationListItem(BaseModel):
     id: int
     title: str
@@ -38,6 +53,7 @@ class ConversationListItem(BaseModel):
     bazi_summary: Optional[str] = None   # 八字才有，格式 "丙午·癸巳·庚辰·癸未"
     hexagram: Optional[HexagramSummary] = None  # 六爻才有
     task_context: Optional[Dict[str, Any]] = None
+    digest: Optional[DigestResponse] = None
 
 
 class ConversationListResp(BaseModel):
@@ -178,6 +194,7 @@ def list_conversations(
     type: Literal["bazi", "liuyao"] = Query(..., description="会话类型"),
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
+    q: str = Query("", max_length=80),
     db: Session = Depends(get_db),
     user_id: int = Depends(get_current_user_or_401),
 ):
@@ -185,6 +202,21 @@ def list_conversations(
     base_q = _conversation_type_query(user_id, type).where(
         _has_displayable_assistant_message_query()
     )
+    if q.strip():
+        text = q.strip()
+        metadata_match = select(ConversationDigest.conversation_id).where(
+            ConversationDigest.conversation_id == Conversation.id,
+            or_(*[column.contains(text, autoescape=True) for column in (
+                ConversationDigest.title, ConversationDigest.custom_title,
+                ConversationDigest.question, ConversationDigest.summary,
+            )]),
+        ).exists()
+        message_match = select(Message.id).where(
+            Message.conversation_id == Conversation.id,
+            Message.role.in_(["user", "assistant"]),
+            Message.content.contains(text, autoescape=True),
+        ).exists()
+        base_q = base_q.where(or_(Conversation.title.contains(text, autoescape=True), metadata_match, message_match))
 
     total = db.scalar(
         select(func.count()).select_from(base_q.subquery())
@@ -197,6 +229,9 @@ def list_conversations(
     ).all()
 
     items: List[ConversationListItem] = []
+    digests = {row.conversation_id: row for row in db.scalars(select(ConversationDigest).where(
+        ConversationDigest.conversation_id.in_([conv.id for conv in rows])
+    )).all()} if rows else {}
     for conv in rows:
         # 取最后一条可展示的 user / assistant 消息预览。
         user_messages = db.scalars(
@@ -209,6 +244,10 @@ def list_conversations(
             (safe for text in user_messages if (safe := _safe_user_message(text))),
             None,
         )
+        first_user = db.scalars(select(Message.content).where(
+            Message.conversation_id == conv.id, Message.role == "user",
+        ).order_by(Message.id).limit(10)).all()
+        fallback_title = next((safe for text in first_user if (safe := _safe_user_message(text))), None)
         last_asst = db.scalar(
             select(Message.content)
             .where(Message.conversation_id == conv.id, Message.role == "assistant")
@@ -230,7 +269,8 @@ def list_conversations(
 
         items.append(ConversationListItem(
             id=conv.id,
-            title=conv.title,
+            title=(digests[conv.id].custom_title or digests[conv.id].title or fallback_title or conv.title)[:80]
+                if conv.id in digests else (hexagram_summary.question if hexagram_summary else fallback_title or conv.title)[:80],
             created_at=conv.created_at,
             updated_at=conv.updated_at,
             last_user_message=_preview(last_user),
@@ -238,6 +278,7 @@ def list_conversations(
             bazi_summary=_four_pillars_summary(conv.bazi_chart_snapshot) if type == "bazi" else None,
             hexagram=hexagram_summary,
             task_context=conv.task_context,
+            digest=_digest_response(digests.get(conv.id), db, conv.id),
         ))
 
     return ConversationListResp(
@@ -346,3 +387,104 @@ def delete_conversation(
         raise HTTPException(status_code=404, detail="会话不存在")
     db.delete(conv)
     db.commit()
+
+# Metadata endpoints do not mutate Conversation.updated_at.
+def _digest_response(digest, db, conversation_id):
+    if not digest:
+        return DigestResponse()
+    latest = db.scalar(select(func.max(Message.id)).where(
+        Message.conversation_id == conversation_id,
+        Message.role == 'assistant',
+    )) or 0
+    status = digest.status
+    if status == 'pending' and digest.requested_at and digest.requested_at < datetime.utcnow() - timedelta(minutes=2):
+        status = 'failed'
+    return DigestResponse(
+        **{name: getattr(digest, name) for name in (
+            'title', 'custom_title', 'topic', 'question', 'summary',
+            'source_message_id', 'generated_at',
+        )},
+        status=status,
+        stale=bool(digest.summary and latest > digest.source_message_id),
+    )
+
+
+def _owned_conversation(db, conversation_id, user_id, lock=False):
+    query = select(Conversation).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+    if lock:
+        query = query.with_for_update()
+    conv = db.scalar(query)
+    if not conv:
+        raise HTTPException(status_code=404, detail='会话不存在')
+    return conv
+
+
+@router.get('/{conversation_id}/digest', response_model=DigestResponse)
+def get_digest(conversation_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_or_401)):
+    _owned_conversation(db, conversation_id, user_id)
+    return _digest_response(db.get(ConversationDigest, conversation_id), db, conversation_id)
+
+
+class DigestRequest(BaseModel):
+    refresh: bool = False
+
+
+@router.post('/{conversation_id}/digest', response_model=DigestResponse)
+def request_digest(conversation_id: int, payload: DigestRequest, background_tasks: BackgroundTasks,
+                   db: Session = Depends(get_db), user_id: int = Depends(get_current_user_or_401)):
+    # Parent row lock serializes first insert and simultaneous requests.
+    _owned_conversation(db, conversation_id, user_id, lock=True)
+    digest = db.get(ConversationDigest, conversation_id)
+    view = _digest_response(digest, db, conversation_id)
+    if view.status == 'pending' or (view.summary and (not payload.refresh or not view.stale)):
+        db.commit()
+        return view
+    now = datetime.utcnow()
+    if digest and digest.requested_at and digest.requested_at > now - timedelta(seconds=60):
+        raise HTTPException(status_code=429, detail='请稍后再试，原对话仍可继续查看')
+    recent = db.scalar(select(func.count()).select_from(ConversationDigest).join(
+        Conversation, Conversation.id == ConversationDigest.conversation_id,
+    ).where(Conversation.user_id == user_id,
+            ConversationDigest.requested_at > now - timedelta(hours=1))) or 0
+    if recent >= 10:
+        raise HTTPException(status_code=429, detail='本小时整理次数较多，请稍后再试')
+    valid_reply = db.scalar(select(Message.id).where(
+        Message.conversation_id == conversation_id, Message.role == 'assistant',
+        func.length(func.trim(Message.content)) > 0,
+    ).limit(1))
+    if not valid_reply:
+        raise HTTPException(status_code=409, detail='还没有可以整理的解读内容')
+    if not digest:
+        digest = ConversationDigest(conversation_id=conversation_id)
+        db.add(digest)
+    digest.status = 'pending'
+    digest.request_token = str(uuid4())
+    digest.requested_at = now
+    db.flush()
+    result = _digest_response(digest, db, conversation_id)
+    token = digest.request_token
+    db.commit()
+    background_tasks.add_task(generate_digest, conversation_id, token)
+    return result
+
+
+class RenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+
+
+@router.patch('/{conversation_id}/title', response_model=DigestResponse)
+def rename_conversation(conversation_id: int, payload: RenameRequest,
+                        db: Session = Depends(get_db), user_id: int = Depends(get_current_user_or_401)):
+    _owned_conversation(db, conversation_id, user_id, lock=True)
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail='请输入标题')
+    digest = db.get(ConversationDigest, conversation_id)
+    if not digest:
+        digest = ConversationDigest(conversation_id=conversation_id)
+        db.add(digest)
+    digest.custom_title = title
+    db.flush()
+    result = _digest_response(digest, db, conversation_id)
+    db.commit()
+    return result
