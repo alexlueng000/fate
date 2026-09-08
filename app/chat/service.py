@@ -238,7 +238,7 @@ def start_chat(
 
             except Exception as e:
                 logger.error("start_chat_stream_error", error=str(e))
-                final = "抱歉，AI 服务暂时不可用，请稍后再试。"
+                final = "抱歉，本次解读生成失败。你可以刷新页面后重新提问，或稍后再试。"
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
 
             # 必须在 [DONE] 之前持久化。客户端收到 [DONE] 后会主动结束读取，
@@ -579,7 +579,7 @@ def send_chat(
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
             except Exception as e:
                 logger.error("send_chat_stream_error", error=str(e))
-                final = "抱歉，AI 服务暂时不可用，请稍后再试。"
+                final = "抱歉，本次解读生成失败。你可以刷新页面后重新提问，或稍后再试。"
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
 
             # 与 start_chat 一致：先保存，再宣告流结束。
@@ -793,7 +793,7 @@ def simplify_message(message_content: str, request: Request):
                 yield sse_pack("[DONE]")
             except Exception as e:
                 logger.error("simplify_stream_error", error=str(e))
-                yield sse_pack(json.dumps({"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True}, ensure_ascii=False))
+                yield sse_pack(json.dumps({"text": "抱歉，本次解读生成失败。你可以刷新页面后重新提问，或稍后再试。", "replace": True}, ensure_ascii=False))
                 yield sse_pack("[DONE]")
 
         return sse_response(gen)

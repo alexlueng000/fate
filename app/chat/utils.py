@@ -455,8 +455,8 @@ class IncrementalNormalizer:
         self._raw_chunks.append(delta)
         self._token_count += 1
 
-        # Only normalize every N tokens
-        if self._token_count % self._normalize_interval == 0:
+        # Reveal the first content immediately, then batch subsequent updates.
+        if self._token_count == 1 or self._token_count % self._normalize_interval == 0:
             return self._normalize()
 
         return None
