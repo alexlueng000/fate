@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from uuid import uuid4
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -98,8 +99,12 @@ def _four_pillars_summary(bazi_chart_snapshot: Optional[dict]) -> Optional[str]:
         parts = []
         for key in ("year", "month", "day", "hour"):
             pillar = fp.get(key, {})
-            stem = pillar.get("stem", "")
-            branch = pillar.get("branch", "")
+            if isinstance(pillar, (list, tuple, str)) and len(pillar) == 2:
+                stem, branch = pillar
+            elif isinstance(pillar, dict):
+                stem, branch = pillar.get("stem", ""), pillar.get("branch", "")
+            else:
+                stem, branch = "", ""
             parts.append(f"{stem}{branch}"[:2] if stem or branch else "?")
         return "·".join(parts) if any(p != "?" for p in parts) else None
     except Exception:
@@ -109,7 +114,16 @@ def _four_pillars_summary(bazi_chart_snapshot: Optional[dict]) -> Optional[str]:
 def _preview(text: Optional[str], limit: int = 60) -> Optional[str]:
     if not text:
         return None
-    text = text.strip()
+    # Only display previews are flattened; persisted messages remain untouched.
+    text = re.sub(r"```[^\n]*\n[\s\S]*?```", " ", text)
+    text = re.sub(r"!\[([^]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"\[([^]]+)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"(?m)^\s{0,3}(?:#{1,6}\s+|>\s*|[-*+]\s+)", "", text)
+    text = re.sub(r"[*`_~]+", "", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
     return text[:limit] + "…" if len(text) > limit else text
 
 
@@ -121,6 +135,13 @@ def _safe_user_message(text: Optional[str]) -> Optional[str]:
     content = text.strip()
     if not content:
         return None
+
+    if content.startswith("请基于以下卦象做第一次解读"):
+        question = re.search(
+            r"所问之事[：:]\s*(.*?)(?=\n\s*-\s*(?:性别|本卦)[：:]|$)",
+            content, re.S,
+        )
+        return question.group(1).strip() if question else None
 
     if content.startswith("我的命盘信息如下"):
         return None

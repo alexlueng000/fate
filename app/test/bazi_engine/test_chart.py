@@ -28,7 +28,7 @@ def test_build_chart_matches_known_lunar_python_chart():
     assert chart.four_pillars.year.ganzhi() == "癸酉"
     assert chart.four_pillars.month.ganzhi() == "乙卯"
     assert chart.four_pillars.day.ganzhi() == "己丑"
-    assert chart.metadata.version == CalculationVersion.ENGINE_V2
+    assert chart.metadata.version == CalculationVersion.ENGINE_V2_1
     assert chart.metadata.source == "engine"
     assert chart.metadata.calculated_at == datetime(2026, 8, 1, tzinfo=timezone.utc)
     assert all(period.pillar.ganzhi() for period in chart.dayun)

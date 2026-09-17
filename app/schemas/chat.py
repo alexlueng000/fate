@@ -53,7 +53,7 @@ class PaipanPayload(BaseModel):
     gender: str = Field(..., description="性别：男/女")
     four_pillars: Dict[str, List[str]]
     dayun: List[Dict[str, Any]]
-    solar_date: Optional[str] = Field(None, description="公历出生日期时间（真太阳时），YYYY-MM-DD HH:MM:SS")
+    solar_date: Optional[str] = Field(None, description="排盘使用的公历日期时间（可能仅经度修正，不含均时差），YYYY-MM-DD HH:MM:SS")
 
 class ChatStartReq(BaseModel):
     paipan: Optional[PaipanPayload] = None

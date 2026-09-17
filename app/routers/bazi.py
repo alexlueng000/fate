@@ -277,26 +277,39 @@ class PaipanIn(BaseModel):
     birth_date: str = Field(..., description="YYYY-MM-DD")
     birth_time: str = Field(..., description="HH:MM")  # 24小时制
     birthplace: str = Field(..., description="城市名称，如：广东阳春")
-    use_true_solar: bool = True           # 是否启用真太阳时（默认不启用）
+    use_true_solar: bool = True  # 兼容字段名：当前只做经度修正，不含均时差
+    leap_month: bool = False
 
     # 可选直传（若前端已拿到经纬度，可跳过地名解析）
-    lat: Optional[float] = None
-    lng: Optional[float] = None
+    lat: Optional[float] = Field(default=None, ge=-90, le=90)
+    lng: Optional[float] = Field(default=None, ge=-180, le=180)
     # 可选：若你支持自带经度修正，允许直接传经度
-    longitude: Optional[float] = None
+    longitude: Optional[float] = Field(default=None, ge=-180, le=180)
 
 def compose_local_dt_str(date_str: str, time_str: str) -> str:
     """把 YYYY-MM-DD + HH:MM -> 'YYYY-MM-DD HH:MM:SS'"""
     # 统一补秒，避免解析问题
     return f"{date_str.strip()} {time_str.strip()}:00"
 
-def to_birthday_adjusted(inb: PaipanIn) -> str:
+def to_birthday_adjusted(inb: PaipanIn, metadata: Optional[dict] = None) -> str:
     """
     计算 birthday_adjusted（真太阳时 or 本地时）
     返回格式：'YYYY-MM-DD HH:MM:SS'
     """
+    if metadata is not None:
+        metadata.update(time_correction_method="none", warnings=[])
     # 1) 本地时
-    local_dt = compose_local_dt_str(inb.birth_date, inb.birth_time)
+    if inb.leap_month and inb.calendar != "lunar":
+        raise ValueError("闰月选项仅适用于农历")
+    if inb.calendar == "lunar":
+        year, month, day = map(int, inb.birth_date.split("-"))
+        hour, minute = map(int, inb.birth_time.split(":"))
+        solar = Lunar.fromYmdHms(
+            year, -month if inb.leap_month else month, day, hour, minute, 0,
+        ).getSolar()
+        local_dt = solar.toYmdHms()
+    else:
+        local_dt = compose_local_dt_str(inb.birth_date, inb.birth_time)
 
     if not inb.use_true_solar:
         return local_dt
@@ -310,16 +323,20 @@ def to_birthday_adjusted(inb: PaipanIn) -> str:
     else:
         geo = geo_amap.geocode_city(inb.birthplace)
         if "error" in geo:
-            # 回退成“本地时”，也可以选择抛错
-            # raise HTTPException(400, f"地名解析失败：{geo['error']}")
+            if metadata is not None:
+                metadata["warnings"].append("出生地解析失败，未应用经度修正，保留当地钟表时间")
             return local_dt
         longitude = geo["lng"]
 
     # 3) 真太阳时换算（经度修正简化版）
     ts = calc_true_solar(SolarIn(birth_date=local_dt, longitude=longitude))
     if "true_solar_time" in ts:
+        if metadata is not None:
+            metadata["time_correction_method"] = "longitude_only"
+            metadata["warnings"].append("仅应用经度修正，未计入均时差")
         return ts["true_solar_time"]
-    # 失败回退：返回本地时
+    if metadata is not None:
+        metadata["warnings"].append("经度修正失败，保留当地钟表时间")
     return local_dt
 
 
@@ -340,19 +357,16 @@ def calc_bazi(body: PaipanIn):
     logger.info("calc_paipan_request", gender=body.gender, birth_date=body.birth_date, birthplace=body.birthplace)
     try:
         # 1) 解析时间
-        birthday_adjusted = to_birthday_adjusted(body)
+        time_metadata: dict = {}
+        birthday_adjusted = to_birthday_adjusted(body, time_metadata)
         dt_obj = datetime.strptime(birthday_adjusted, "%Y-%m-%d %H:%M:%S")
 
-        # 2) 根据 calendar 类型获取 Lunar 对象
-        if body.calendar == "lunar":
-            # 农历输入：直接使用 Lunar.fromYmdHms() 创建农历对象
-            lunar = Lunar.fromYmdHms(dt_obj.year, dt_obj.month, dt_obj.day,
-                                     dt_obj.hour, dt_obj.minute, dt_obj.second)
-        else:
-            # 公历输入：先创建 Solar 对象，再转换为 Lunar
-            solar = Solar.fromYmdHms(dt_obj.year, dt_obj.month, dt_obj.day,
-                                     dt_obj.hour, dt_obj.minute, dt_obj.second)
-            lunar = solar.getLunar()
+        # 转换函数始终返回公历时间；不得将校正后的时间再次按农历解释。
+        solar = Solar.fromYmdHms(
+            dt_obj.year, dt_obj.month, dt_obj.day,
+            dt_obj.hour, dt_obj.minute, dt_obj.second,
+        )
+        lunar = solar.getLunar()
 
         # 3) 四柱（清洗成 ["干","支"]）
         # 注意：必须使用 EightChar 类来获取八字四柱，而不是 Lunar 类
@@ -387,7 +401,9 @@ def calc_bazi(body: PaipanIn):
                 "gender": body.gender,
                 "four_pillars": four_pillars,
                 "dayun": dayun_list,
-                "solar_date": birthday_adjusted,   # "YYYY-MM-DD HH:MM:SS"（真太阳时）
+                "solar_date": birthday_adjusted,  # 公历，经度修正不含均时差
+                "calculation_version": "legacy-1.1",
+                **time_metadata,
             }
         }
     except Exception as e:

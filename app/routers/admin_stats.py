@@ -27,6 +27,7 @@ from app.models.order import Order
 from app.models.quota import UserQuota
 from app.models.usage_log import UsageLog
 from app.services.quota import QuotaService
+from app.services.stats_windows import utc_now, calendar_window, is_return_visit
 from app.core.logging import get_logger
 
 logger = get_logger("admin.stats")
@@ -41,31 +42,34 @@ async def get_overview(
     """获取总览统计数据"""
     logger.info("get_overview_request")
 
-    today = datetime.now().date()
-    week_ago = today - timedelta(days=7)
-    month_ago = today - timedelta(days=30)
+    now = utc_now()
+    today_start, today_end = calendar_window(now, 1)
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
 
     # 用户统计
     total_users = db.query(func.count(User.id)).scalar() or 0
     today_users = db.query(func.count(User.id)).filter(
-        func.date(User.created_at) == today
+        User.created_at >= today_start, User.created_at < today_end, User.created_at <= now
     ).scalar() or 0
     week_users = db.query(func.count(User.id)).filter(
-        func.date(User.created_at) >= week_ago
+        User.created_at >= week_ago, User.created_at <= now
     ).scalar() or 0
     month_users = db.query(func.count(User.id)).filter(
-        func.date(User.created_at) >= month_ago
+        User.created_at >= month_ago, User.created_at <= now
     ).scalar() or 0
 
-    # 活跃用户（7天内有登录）
-    active_users = db.query(func.count(User.id)).filter(
-        User.last_login_at >= datetime.now() - timedelta(days=7)
+    # 以实际发送非空用户消息衡量活跃，避免长会话用户因未重新登录而漏计。
+    active_users = db.query(func.count(func.distinct(Message.user_id))).filter(
+        Message.role == "user", func.length(func.trim(Message.content)) > 0,
+        Message.created_at >= week_ago, Message.created_at <= now,
     ).scalar() or 0
 
     # 对话统计
     total_conversations = db.query(func.count(Conversation.id)).scalar() or 0
     today_conversations = db.query(func.count(Conversation.id)).filter(
-        func.date(Conversation.created_at) == today
+        Conversation.created_at >= today_start, Conversation.created_at < today_end,
+        Conversation.created_at <= now
     ).scalar() or 0
 
     # 消息统计
@@ -83,20 +87,20 @@ async def get_overview(
     ).scalar() or 0
 
     # 产品核心转化指标。分母为 0 时返回 0，避免前端出现不可解释的空值。
-    new_user_cutoff = datetime.now() - timedelta(days=30)
+    new_user_cutoff = month_ago
     new_users = db.query(func.count(User.id)).filter(
-        User.created_at >= new_user_cutoff
+        User.created_at >= new_user_cutoff, User.created_at <= now
     ).scalar() or 0
     activated_new_users = db.query(func.count(func.distinct(User.id))).join(
         Conversation, Conversation.user_id == User.id
-    ).filter(User.created_at >= new_user_cutoff).scalar() or 0
+    ).filter(User.created_at >= new_user_cutoff, User.created_at <= now).scalar() or 0
 
     conversations_with_user_messages = db.query(
         Message.conversation_id
-    ).filter(Message.role == "user").group_by(Message.conversation_id).subquery()
+    ).filter(Message.role == "user", func.length(func.trim(Message.content)) > 0).group_by(Message.conversation_id).subquery()
     conversations_with_followup = db.query(
         Message.conversation_id
-    ).filter(Message.role == "user").group_by(Message.conversation_id).having(
+    ).filter(Message.role == "user", func.length(func.trim(Message.content)) > 0).group_by(Message.conversation_id).having(
         func.count(Message.id) >= 2
     ).subquery()
     interpreted_conversations = db.query(func.count()).select_from(
@@ -106,21 +110,30 @@ async def get_overview(
         conversations_with_followup
     ).scalar() or 0
 
-    # 只统计已完整度过 7 日观察窗的近 30 日 cohort；第 2-7 天有消息即视为复访。
-    cohort_start = datetime.now() - timedelta(days=37)
-    cohort_end = datetime.now() - timedelta(days=7)
+    # 完整观察 168 小时；仅非空 user 消息算复访，排除自动生成的回复。
+    cohort_start = now - timedelta(days=37)
+    cohort_end = now - timedelta(days=7)
     eligible_users = db.query(User.id, User.created_at).filter(
         User.created_at >= cohort_start,
-        User.created_at < cohort_end,
+        User.created_at <= cohort_end,
     ).all()
-    retained_users = 0
-    for user_id, created_at in eligible_users:
-        returned = db.query(Message.id).filter(
-            Message.user_id == user_id,
-            Message.created_at >= created_at + timedelta(days=1),
-            Message.created_at < created_at + timedelta(days=8),
-        ).first()
-        retained_users += int(returned is not None)
+    registrations = dict(eligible_users)
+    returned_ids = set()
+    if registrations:
+        # 一次查询代替每个用户一次查询，并仅加载复访判断所需字段。
+        candidates = db.query(Message.user_id, Message.created_at).join(
+            User, Message.user_id == User.id,
+        ).filter(
+            User.created_at >= cohort_start, User.created_at <= cohort_end,
+            Message.role == "user", func.length(func.trim(Message.content)) > 0,
+            Message.created_at >= cohort_start + timedelta(days=1),
+            Message.created_at <= now,
+        ).all()
+        returned_ids = {
+            user_id for user_id, sent_at in candidates
+            if is_return_visit(registrations[user_id], sent_at)
+        }
+    retained_users = len(returned_ids)
 
     paid_users = db.query(func.count(func.distinct(Order.user_id))).filter(
         Order.status == "PAID"
@@ -130,6 +143,11 @@ async def get_overview(
         return round(numerator * 100 / denominator, 2) if denominator else 0.0
 
     return {
+        "meta": {
+            "version": "overview-2", "timezone": "Asia/Shanghai",
+            "as_of": now.isoformat() + "Z",
+            "scope": "全部历史账号，尚未排除测试账号和历史来源；解读完成率暂未采集",
+        },
         "users": {
             "total": total_users,
             "today": today_users,
@@ -160,6 +178,9 @@ async def get_overview(
                 "interpreted_conversations": interpreted_conversations,
                 "retention_cohort": len(eligible_users),
                 "paid_users": paid_users,
+                "activated_new_users": activated_new_users,
+                "followed_up_conversations": followed_up_conversations,
+                "retained_users": retained_users,
             }
         }
     }
@@ -175,20 +196,22 @@ async def get_users_trend(
     logger.info("get_users_trend_request", period=period)
 
     days = int(period.replace("d", ""))
-    start_date = datetime.now().date() - timedelta(days=days)
-
+    now = utc_now()
+    start, end = calendar_window(now, days)
+    local_date = func.date(func.timestampadd(text("HOUR"), 8, User.created_at))
     results = db.query(
-        func.date(User.created_at).label("date"),
-        func.count(User.id).label("count")
+        local_date.label("date"), func.count(User.id).label("count")
     ).filter(
-        func.date(User.created_at) >= start_date
-    ).group_by(
-        func.date(User.created_at)
-    ).order_by(
-        func.date(User.created_at)
-    ).all()
-
-    data = [{"date": str(r.date), "count": r.count} for r in results]
+        User.created_at >= start, User.created_at < end,
+        User.created_at <= now,
+    ).group_by(local_date).order_by(local_date).all()
+    counts = {str(row.date): row.count for row in results}
+    first_day = (start + timedelta(hours=8)).date()
+    data = [
+        {"date": str(first_day + timedelta(days=i)),
+         "count": counts.get(str(first_day + timedelta(days=i)), 0)}
+        for i in range(days)
+    ]
 
     return {
         "period": period,
@@ -240,20 +263,22 @@ async def get_conversations_trend(
     logger.info("get_conversations_trend_request", period=period)
 
     days = int(period.replace("d", ""))
-    start_date = datetime.now().date() - timedelta(days=days)
-
+    now = utc_now()
+    start, end = calendar_window(now, days)
+    local_date = func.date(func.timestampadd(text("HOUR"), 8, Conversation.created_at))
     results = db.query(
-        func.date(Conversation.created_at).label("date"),
-        func.count(Conversation.id).label("count")
+        local_date.label("date"), func.count(Conversation.id).label("count")
     ).filter(
-        func.date(Conversation.created_at) >= start_date
-    ).group_by(
-        func.date(Conversation.created_at)
-    ).order_by(
-        func.date(Conversation.created_at)
-    ).all()
-
-    data = [{"date": str(r.date), "count": r.count} for r in results]
+        Conversation.created_at >= start, Conversation.created_at < end,
+        Conversation.created_at <= now,
+    ).group_by(local_date).order_by(local_date).all()
+    counts = {str(row.date): row.count for row in results}
+    first_day = (start + timedelta(hours=8)).date()
+    data = [
+        {"date": str(first_day + timedelta(days=i)),
+         "count": counts.get(str(first_day + timedelta(days=i)), 0)}
+        for i in range(days)
+    ]
 
     return {
         "period": period,

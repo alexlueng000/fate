@@ -74,33 +74,27 @@ def build_chart(
             "day_boundary_rule=23:00 is not enabled until boundary goldens exist"
         )
 
-    adjustment = adjust_birth_time(birth, calculation_options)
-    adjusted_input = adjustment.adjusted_datetime
-    if not isinstance(adjusted_input, datetime):
-        raise TypeError("adjusted birth time must be a datetime")
-
     Lunar, Solar, Yun = _load_lunar_python()
+    # Convert the calendar before applying corrections to a real solar date.
+    solar_birth = birth
     if birth.calendar == "lunar":
-        lunar_month = -adjusted_input.month if birth.leap_month else adjusted_input.month
-        lunar = Lunar.fromYmdHms(
-            adjusted_input.year,
-            lunar_month,
-            adjusted_input.day,
-            adjusted_input.hour,
-            adjusted_input.minute,
-            adjusted_input.second,
-        )
-        solar = lunar.getSolar()
-    else:
-        solar = Solar.fromYmdHms(
-            adjusted_input.year,
-            adjusted_input.month,
-            adjusted_input.day,
-            adjusted_input.hour,
-            adjusted_input.minute,
-            adjusted_input.second,
-        )
-        lunar = solar.getLunar()
+        entered = birth.local_datetime
+        lunar_month = -entered.month if birth.leap_month else entered.month
+        solar = Lunar.fromYmdHms(
+            entered.year, lunar_month, entered.day,
+            entered.hour, entered.minute, entered.second,
+        ).getSolar()
+        solar_birth = birth.model_copy(update={
+            "calendar": "gregorian", "leap_month": False,
+            "local_datetime": _solar_datetime(solar),
+        })
+    adjustment = adjust_birth_time(solar_birth, calculation_options)
+    adjusted_input = adjustment.adjusted_datetime
+    solar = Solar.fromYmdHms(
+        adjusted_input.year, adjusted_input.month, adjusted_input.day,
+        adjusted_input.hour, adjusted_input.minute, adjusted_input.second,
+    )
+    lunar = solar.getLunar()
 
     eight_char = lunar.getEightChar()
     four_pillars = FourPillars(

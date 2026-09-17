@@ -8,10 +8,11 @@ class CalculationVersion(str, Enum):
 
     LEGACY_V1 = "legacy-1"
     ENGINE_V2 = "bazi-engine-2.0"
+    ENGINE_V2_1 = "bazi-engine-2.1"
 
 
 LEGACY_CALCULATION_VERSION = CalculationVersion.LEGACY_V1
-CURRENT_CALCULATION_VERSION = CalculationVersion.ENGINE_V2
+CURRENT_CALCULATION_VERSION = CalculationVersion.ENGINE_V2_1
 SUPPORTED_CALCULATION_VERSIONS = tuple(CalculationVersion)
 
 

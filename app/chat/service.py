@@ -185,7 +185,7 @@ def start_chat(
 
         opening_user_msg = (
             f"我的命盘信息如下：\n"
-            f"公历出生日期（真太阳时）：{paipan.get('solar_date', '')}\n"
+            f"排盘使用的公历日期时间：{paipan.get('solar_date', '')}\n"
             f"性别：{paipan['gender']}\n"
             f"八字：\n{utils.format_four_pillars(paipan['four_pillars'])}\n"
             f"大运：\n{utils.format_dayun(paipan['dayun'])}\n\n"
@@ -541,7 +541,7 @@ def send_chat(
         if paipan and paipan.get("four_pillars") and paipan.get("dayun"):
             paipan_context = (
                 f"我的命盘信息如下：\n"
-                f"公历出生日期（真太阳时）：{paipan.get('solar_date', '')}\n"
+                f"排盘使用的公历日期时间：{paipan.get('solar_date', '')}\n"
                 f"性别：{paipan.get('gender', '')}\n"
                 f"八字：\n{utils.format_four_pillars(paipan['four_pillars'])}\n"
                 f"大运：\n{utils.format_dayun(paipan['dayun'])}"
