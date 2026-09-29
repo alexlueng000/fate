@@ -44,3 +44,6 @@ docs/
 *.docx
 
 *.md
+
+# Keep website JSAPI deployment instructions with the implementation.
+!WECHAT_JSAPI.md

@@ -289,3 +289,27 @@ class VideoProgressOut(BaseModel):
     last_watched_at: Optional[datetime] = None
 
     model_config = dict(from_attributes=True)
+
+
+class WeChatJsapiAuthorizeIn(BaseModel):
+    product_code: str = Field(min_length=1, max_length=128)
+    redirect_uri: str = Field(max_length=512)
+
+
+class WeChatJsapiAuthorizeOut(BaseModel):
+    url: str
+    state: str
+    ticket: str
+
+
+class WeChatJsapiCheckoutIn(BaseModel):
+    code: str = Field(min_length=1, max_length=256)
+    state: str = Field(min_length=1, max_length=128)
+    ticket: str = Field(min_length=1, max_length=2048)
+
+
+class WeChatJsapiCheckoutOut(BaseModel):
+    order: OrderOut
+    payment: PaymentOut
+    code_url: str = ""
+    pay_params: Dict[str, str]

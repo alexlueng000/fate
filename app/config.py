@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # 'prod'：严格验签/解密；'dev'：跳过验签便于联调
     wechat_pay_mode: str = "dev"
     wechat_pay_appid: Optional[str] = None
+    # Website JSAPI uses a public-account AppID, never the legacy Mini Program ID.
+    wechat_jsapi_enabled: bool = False
+    wechat_jsapi_appid: Optional[str] = None
+    wechat_jsapi_secret: Optional[str] = None
+    wechat_jsapi_origins: str = "https://fateinsight.site,https://yizhanmaster.site"
     wechat_pay_mchid: Optional[str] = None
     wechat_pay_merchant_serial_no: Optional[str] = None
     wechat_pay_private_key_pem: Optional[str] = None

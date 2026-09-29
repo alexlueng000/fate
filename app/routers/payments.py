@@ -1,6 +1,12 @@
 # app/routers/payments.py
 from __future__ import annotations
 
+import httpx
+
+from app.services import wechat_jsapi as jsapi_service
+from app.schemas import (WeChatJsapiAuthorizeIn, WeChatJsapiAuthorizeOut,
+                         WeChatJsapiCheckoutIn, WeChatJsapiCheckoutOut)
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -129,3 +135,39 @@ def simulate_payment(
         granted=granted,
         quotas=quotas,
     )
+
+
+@router.post("/wechat/jsapi/authorize", response_model=WeChatJsapiAuthorizeOut)
+def authorize_wechat_jsapi(
+    body: WeChatJsapiAuthorizeIn,
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return jsapi_service.authorize(user_id=current_user.id, product_code=body.product_code,
+                                       redirect_uri=body.redirect_uri)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/wechat/jsapi", response_model=WeChatJsapiCheckoutOut, status_code=201)
+def create_wechat_jsapi_checkout(
+    body: WeChatJsapiCheckoutIn,
+    db: Session = Depends(get_db_tx),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        jsapi_service.require_config()
+        product_code = jsapi_service.validate_ticket(
+            user_id=current_user.id, ticket=body.ticket, state=body.state,
+        )
+        product = get_by_code(db, product_code, active_only=True)
+        if not product:
+            raise HTTPException(status_code=404, detail="商品不存在或已下架")
+        openid = jsapi_service.exchange_openid(body.code)
+        order = order_service._create_order(db, user=current_user, product=product)
+        payment, params = jsapi_service.create_prepay(db, order=order, openid=openid)
+        return WeChatJsapiCheckoutOut(order=order, payment=payment, pay_params=params)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="微信服务连接失败，请稍后重试。") from exc
