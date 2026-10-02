@@ -13,7 +13,7 @@ from sqlalchemy import select
 from app.test.test_completed_reply import sessions, stats, ANSWER
 from app.models.chat import Message
 from app.models.chat_turn_request import ChatTurnRequest
-from app.services.chat_turn_request import reserve_turn, request_status, mark_failed, run_turn
+from app.services.chat_turn_request import reserve_turn, request_status, mark_failed, run_turn, conversation_request
 from app.services.completed_reply import save_completed_exchange
 
 KEY = 'a' * 32
@@ -41,6 +41,87 @@ def test_completed_request_replays_from_new_session_even_at_zero_quota(turns):
         assert request_status(db, 1, KEY) == replay
         assert db.get(ChatTurnRequest, (1, KEY)).active_conversation_id is None
     assert stats(turns) == (1, 2)
+
+
+@pytest.mark.parametrize('kind,cid,payload', [('bazi', 'bazi_conv_1', {'message': '原问题', 'display_message': '显示文字', 'task_context': {'facts': {'topic': '原事实'}}}),
+    ('liuyao', 'liuyao_conv_2', {'message': '原问题'}), ('liuyao', 'liuyao_conv_2', {'label': '核对条件', 'prompt': '原快捷问题'})])
+def test_another_device_discovers_the_original_body_without_writes(turns, kind, cid, payload):
+    with turns() as db:
+        attempt = reserve(db, kind=kind, cid=cid, payload=payload)
+        updated = db.get(ChatTurnRequest, (1, KEY)).updated_at
+    with turns() as db:
+        state = conversation_request(db, 1, cid)
+        assert state['state'] == 'pending' and state['request_key'] == KEY and state['kind'] == kind
+        assert state['request_payload'] == payload and state['baseline_message_id'] == 0
+        assert not {'token', 'payload_hash', 'lease_until', 'reservation'} & state.keys()
+        assert db.get(ChatTurnRequest, (1, KEY)).updated_at == updated
+    assert stats(turns, 'chat' if kind == 'bazi' else 'liuyao_chat') == (0, 0)
+
+
+def test_current_active_attempt_takes_priority_and_stale_failures_are_not_restored(turns):
+    with turns() as db:
+        first = reserve(db)['reservation']; mark_failed(db, first)
+        assert conversation_request(db, 1, 'bazi_conv_1')['state'] == 'retryable'
+        second = reserve(db, key='b' * 32, payload={'message': '新的问题'})['reservation']
+        assert conversation_request(db, 1, 'bazi_conv_1')['request_key'] == 'b' * 32
+        save_completed_exchange(db, 1, 1, '新的问题', ANSWER, turn_reservation=second)
+    with turns() as db:
+        assert conversation_request(db, 1, 'bazi_conv_1')['state'] == 'idle'
+    assert stats(turns) == (1, 2)
+
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_expired_attempt_is_retryable_and_old_hash_only_rows_do_not_invent_a_draft(turns, legacy):
+    with turns() as db:
+        reserve(db)
+        job = db.get(ChatTurnRequest, (1, KEY))
+        job.lease_until = datetime.utcnow() - timedelta(seconds=1)
+        if legacy: job.request_payload = None
+        db.commit()
+    with turns() as db:
+        state = conversation_request(db, 1, 'bazi_conv_1')
+        assert state['state'] == 'retryable' and state['request_payload'] == (None if legacy else PAYLOAD)
+        if legacy:
+            reserve(db)
+            assert db.get(ChatTurnRequest, (1, KEY)).request_payload == PAYLOAD
+
+
+def test_corrupt_stored_body_is_rejected_instead_of_becoming_a_new_retry(turns):
+    with turns() as db:
+        reserve(db)
+        db.get(ChatTurnRequest, (1, KEY)).request_payload = {'message': '被改写的问题'}; db.commit()
+        with pytest.raises(HTTPException) as error: conversation_request(db, 1, 'bazi_conv_1')
+        assert error.value.status_code == 409
+
+
+@pytest.mark.parametrize('cid,owner', [('bazi_conv_1', 2), ('liuyao_conv_1', 1), ('bazi_conv_2', 1), ('bazi_conv_999', 1)])
+def test_discovery_cannot_leak_other_accounts_or_mix_conversation_types(turns, cid, owner):
+    with turns() as db:
+        reserve(db)
+        with pytest.raises(HTTPException) as error: conversation_request(db, owner, cid)
+        assert error.value.status_code == 404
+
+
+def test_http_discovery_requires_authentication_and_stops_when_payload_column_is_missing(turns):
+    from sqlalchemy import text
+    from app.routers import chat
+    from app.db import get_db
+    from app.deps import get_current_user_optional
+    app = FastAPI(); app.include_router(chat.router)
+    def dependency():
+        with turns() as db: yield db
+    app.dependency_overrides[get_db] = dependency
+    app.dependency_overrides[get_current_user_optional] = lambda: None
+    with TestClient(app) as client:
+        assert client.get('/chat/conversations/bazi_conv_1/request').status_code == 401
+        app.dependency_overrides[get_current_user_optional] = lambda: SimpleNamespace(id=1)
+        assert client.get('/chat/conversations/1/request').json()['state'] == 'idle'
+        with turns() as db: reserve(db)
+        response = client.get('/chat/conversations/bazi_conv_1/request')
+        assert response.status_code == 200 and response.json()['request_payload'] == PAYLOAD
+        with turns() as db:
+            db.execute(text('ALTER TABLE chat_turn_requests DROP COLUMN request_payload')); db.commit()
+        assert client.get('/chat/conversations/1/request').status_code == 503
 
 
 @pytest.mark.parametrize('change', ['payload', 'kind', 'cid', 'owner'])

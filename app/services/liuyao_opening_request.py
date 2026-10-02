@@ -100,7 +100,7 @@ def reserve_opening(db, user_id, hexagram_id, task_context=None):
         payload = _payload(hexagram)
         digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         db.add(ChatTurnRequest(user_id=user_id, request_key=key, conversation_id=conversation.id,
-            active_conversation_id=conversation.id, kind='liuyao', payload_hash=digest, state='pending', token=token,
+            active_conversation_id=conversation.id, kind='liuyao', payload_hash=digest, request_payload=payload, state='pending', token=token,
             baseline_message_id=0, lease_until=now + timedelta(minutes=LEASE_MINUTES), updated_at=now))
         db.add(LiuyaoOpeningRequest(hexagram_id=hexagram.id, user_id=user_id, request_key=key, conversation_id=conversation.id))
         reservation = {'user_id': user_id, 'request_key': key, 'token': token, 'conversation_id': conversation.id}

@@ -49,6 +49,37 @@ def request_status(db, user_id, request_key):
     return _status(db, job)
 
 
+def conversation_request(db, user_id, raw_cid):
+    """Find unfinished work on an owned conversation without any model call."""
+    raw = str(raw_cid)
+    # Infer the actual kind from the owned DB row; never trust a client kind.
+    cid = numeric_id(raw.removeprefix('liuyao_conv_'), 'bazi')
+    conversation = db.get(Conversation, cid)
+    if not conversation or conversation.user_id != user_id:
+        raise HTTPException(404, '会话不存在')
+    kind = 'liuyao' if conversation.liuyao_hexagram_id else 'bazi'
+    if raw.startswith(('bazi_conv_', 'liuyao_conv_')) and not raw.startswith(f'{kind}_conv_'):
+        raise HTTPException(404, '会话不存在')
+    job = db.scalar(select(ChatTurnRequest).where(ChatTurnRequest.user_id == user_id,
+        ChatTurnRequest.conversation_id == cid, ChatTurnRequest.active_conversation_id == cid))
+    if not job:
+        job = db.scalar(select(ChatTurnRequest).where(ChatTurnRequest.user_id == user_id,
+            ChatTurnRequest.conversation_id == cid, ChatTurnRequest.state == 'failed',
+            ChatTurnRequest.baseline_message_id == _last_message(db, cid))
+            .order_by(ChatTurnRequest.updated_at.desc(), ChatTurnRequest.request_key).limit(1))
+    if not job:
+        return {'state': 'idle', 'conversation_id': f'{kind}_conv_{cid}'}
+    if job.kind != kind:
+        raise HTTPException(409, '请求与会话类型不一致，请从解读记录检查。')
+    payload = job.request_payload
+    if payload is not None:
+        digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        if digest != job.payload_hash:
+            raise HTTPException(409, '保存的问题无法确认，请从解读记录检查。')
+    return {**_status(db, job), 'request_payload': payload, 'baseline_message_id': job.baseline_message_id,
+            'kind': kind}
+
+
 def reserve_turn(db, user_id, raw_cid, kind, request_key, payload):
     key = _key(request_key)
     cid = numeric_id(raw_cid, kind)
@@ -80,6 +111,10 @@ def reserve_turn(db, user_id, raw_cid, kind, request_key, payload):
         if not job:
             job = ChatTurnRequest(user_id=user_id, request_key=key, conversation_id=cid, kind=kind, payload_hash=digest)
             db.add(job)
+        # A validated retry may backfill a legacy attempt. Snapshot only the
+        # original hash-bound body; do not replace it with current profile data.
+        if job.request_payload is None:
+            job.request_payload = json.loads(json.dumps(payload, ensure_ascii=False))
         job.state = 'pending'; job.active_conversation_id = cid; job.token = uuid.uuid4().hex
         job.baseline_message_id = baseline; job.message_id = None
         job.lease_until = now + timedelta(minutes=LEASE_MINUTES); job.updated_at = now

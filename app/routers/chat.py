@@ -214,6 +214,21 @@ def chat_request_status(request_key: str, db: Session = Depends(get_db),
     except SQLAlchemyError as error:
         raise HTTPException(503, '暂时无法查询请求状态，请稍后重试。') from error
 
+
+@router.get('/conversations/{conversation_id}/request')
+def chat_conversation_request(conversation_id: str, db: Session = Depends(get_db),
+                              current_user: Optional[User] = Depends(get_current_user_optional)):
+    if not current_user:
+        raise HTTPException(401, '请先登录')
+    from app.services.chat_turn_request import conversation_request
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        return conversation_request(db, current_user.id, conversation_id)
+    except ValueError as error:
+        raise HTTPException(404, '会话不存在') from error
+    except SQLAlchemyError as error:
+        raise HTTPException(503, '暂时无法查询会话请求，请稍后重新加载。') from error
+
 @router.post("/regenerate", response_model=ChatSendResp)
 def chat_regenerate(
     req: ChatRegenerateReq,
