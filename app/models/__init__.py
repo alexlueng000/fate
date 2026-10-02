@@ -30,6 +30,7 @@ from .consultation import ConsultationPass, ConsultationRequest
 from .personal_report_request import PersonalReportRequest
 from .chat_turn_request import ChatTurnRequest
 from .liuyao_opening_request import LiuyaoOpeningRequest
+from .bazi_opening_request import BaziOpeningRequest
 
 
 __all__ = [

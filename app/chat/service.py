@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from .markdown_utils import normalize_markdown
 from .rag import retrieve_kb, resolve_index_dir
-from .consultation import bounded_history, consultation_context
+from .consultation import bounded_history, consultation_context, user_facts
 from .deepseek_client import call_deepseek, call_deepseek_stream, set_caller
 from .sse import should_stream, sse_pack, sse_response
 from .store import get_conv, set_conv, append_history, delete_conv
@@ -96,6 +96,7 @@ def start_chat(
     profile_id: Optional[int] = None,
     task_context: Optional[Dict[str, Any]] = None,
     report_reservation: Optional[Dict[str, Any]] = None,
+    turn_reservation: Optional[Dict[str, Any]] = None,
 ):
     """
     Start a new chat conversation with initial Bazi analysis.
@@ -149,12 +150,19 @@ def start_chat(
             logger.info("start_chat_init", user_id=user_id, db_present=db is not None)
             if user_id and db:
                 try:
-                    db_conv_id = report_reservation['conversation_id'] if report_reservation else _create_db_conversation(
-                        db, user_id, "八字解读",
-                        profile_id=profile_id,
-                        bazi_chart_snapshot=paipan,
-                        task_context=task_context,
-                    )
+                    if turn_reservation:
+                        from app.models.chat import Conversation
+                        saved = db.get(Conversation, turn_reservation['conversation_id'])
+                        if not saved or saved.user_id != user_id or saved.liuyao_hexagram_id or saved.bazi_chart_snapshot != paipan:
+                            raise ValueError('首次解读与原命盘不一致')
+                        db_conv_id = saved.id
+                    else:
+                        db_conv_id = report_reservation['conversation_id'] if report_reservation else _create_db_conversation(
+                            db, user_id, "八字解读",
+                            profile_id=profile_id,
+                            bazi_chart_snapshot=paipan,
+                            task_context=task_context,
+                        )
                     cid = f"bazi_conv_{db_conv_id}"  # 使用数据库ID，添加类型前缀
                     logger.info("db_conversation_created", db_conv_id=db_conv_id, cid=cid, profile_id=profile_id)
                 except Exception as e:
@@ -192,6 +200,10 @@ def start_chat(
             {"role": "system", "content": composed},
             {"role": "user", "content": opening_user_msg}
         ]
+        facts = user_facts(task_context)
+        if facts:
+            # Explicit facts remain user data, including on a retried opening.
+            messages.append({'role': 'user', 'content': '本次我明确提供的背景：\n' + json.dumps(facts, ensure_ascii=False)})
 
         logger.debug("chat_start_prompt", conversation_id=cid, messages=messages)
 
@@ -252,7 +264,7 @@ def start_chat(
                             from app.db import SessionLocal
                             with SessionLocal() as new_db:
                                 latency = int((utils.now_ms() - t0))
-                                assistant_msg_id = _save_db_exchange(new_db, db_conv_id, user_id, opening_user_msg, final, latency_ms=latency, save_profile_report=True, report_reservation=report_reservation)
+                                assistant_msg_id = _save_db_exchange(new_db, db_conv_id, user_id, opening_user_msg, final, latency_ms=latency, save_profile_report=True, report_reservation=report_reservation, turn_reservation=turn_reservation)
                                 logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id, assistant_msg_id=assistant_msg_id)
                         except Exception as e:
                             logger.error("message_persist_failed", error=str(e), conversation_id=cid)
@@ -314,7 +326,7 @@ def start_chat(
         if db_conv_id and user_id and db:
             try:
                 latency = int((utils.now_ms() - t0))
-                _save_db_exchange(db, db_conv_id, user_id, opening_user_msg, reply, latency_ms=latency, save_profile_report=True, report_reservation=report_reservation)
+                _save_db_exchange(db, db_conv_id, user_id, opening_user_msg, reply, latency_ms=latency, save_profile_report=True, report_reservation=report_reservation, turn_reservation=turn_reservation)
                 logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
             except Exception as e:
                 logger.error("message_persist_failed", error=str(e), conversation_id=cid)

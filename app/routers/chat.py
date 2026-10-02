@@ -1,13 +1,11 @@
 # app/chat/router.py
-from datetime import datetime
 from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
 from ..db import get_db, get_db_tx
 from ..deps import get_current_user_optional
-from ..models import GuestAnalysis, User
-from ..models.profile import UserProfile
+from ..models import User
 from ..services.quota import QuotaService
 from app.schemas.chat import (
     ChatStartReq, ChatStartResp, ChatInitResp,
@@ -22,16 +20,6 @@ import json
 logger = get_logger("chat.router")
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-
-def _extract_mingpan(payload: Any) -> Optional[dict[str, Any]]:
-    if not isinstance(payload, dict):
-        return None
-    mingpan = payload.get("mingpan", payload)
-    if not isinstance(mingpan, dict):
-        return None
-    if not mingpan.get("four_pillars") or not mingpan.get("dayun"):
-        return None
-    return mingpan
 
 @router.post("/init", response_model=ChatInitResp)
 def chat_init(
@@ -71,71 +59,16 @@ def chat_start(
             return result
         cid, reply = result
         return ChatStartResp(conversation_id=cid, reply=reply)
-    profile_id = None
-    paipan_data = req.paipan.model_dump() if req.paipan else {}
-
-    # 已登录用户：从档案读取命盘
     if user_id:
-        profile = db.query(UserProfile).filter_by(user_id=user_id).first()
-
-        if req.guest_analysis_public_id:
-            analysis = (
-                db.query(GuestAnalysis)
-                .filter(
-                    GuestAnalysis.public_id == req.guest_analysis_public_id,
-                    GuestAnalysis.user_id == user_id,
-                )
-                .first()
-            )
-            if not analysis:
-                raise HTTPException(status_code=404, detail="游客分析不存在或尚未保存到当前账户")
-            if analysis.status != "succeeded":
-                raise HTTPException(status_code=400, detail="游客分析尚未生成完成")
-            if analysis.expires_at and analysis.expires_at < datetime.utcnow():
-                raise HTTPException(status_code=400, detail="游客分析已过期")
-
-            mingpan = _extract_mingpan(analysis.bazi_result)
-            if not mingpan:
-                raise HTTPException(status_code=400, detail="游客分析缺少可继续追问的命盘数据")
-
-            paipan_data = mingpan
-            if profile and profile.bazi_chart == analysis.bazi_result:
-                profile_id = profile.id
-            logger.info(
-                "chat_start_with_guest_analysis",
-                user_id=user_id,
-                public_id=req.guest_analysis_public_id,
-                profile_id=profile_id,
-            )
-        else:
-            if not profile:
-                raise HTTPException(status_code=400, detail="请先完善个人档案")
-
-            profile_id = profile.id
-            # 解包 mingpan 层（数据库中保存的格式是 {"mingpan": {...}}）
-            bazi_chart = profile.bazi_chart
-            paipan_data = _extract_mingpan(bazi_chart) or {}
-            logger.info("chat_start_with_profile", user_id=user_id, profile_id=profile_id)
-
-        # 配额检查
-        allowed, msg, remaining = QuotaService.check_available(db, user_id, "chat")
-        if not allowed:
-            raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
-        logger.info("quota_available", user_id=user_id, remaining=remaining)
+        from app.services.bazi_opening_request import generate_opening
+        result = generate_opening(db, user_id, req, request)
     else:
-        # 未登录用户：使用请求中的临时命盘
-        logger.info("chat_start_anonymous", paipan=paipan_data)
-
-    result = start_chat(
-        paipan=paipan_data,
-        kb_index_dir=req.kb_index_dir,
-        kb_topk=req.kb_topk,
-        request=request,
-        user_id=user_id,
-        db=db,
-        profile_id=profile_id,
-        task_context=req.task_context,
-    )
+        # The anonymous compatibility flow has no owned source to bind.
+        result = start_chat(
+            paipan=req.paipan.model_dump() if req.paipan else {},
+            kb_index_dir=req.kb_index_dir, kb_topk=req.kb_topk, request=request,
+            task_context=req.task_context,
+        )
     # 流式：直接返回 StreamingResponse
     from fastapi.responses import StreamingResponse
     if isinstance(result, StreamingResponse):
@@ -143,6 +76,54 @@ def chat_start(
     # 一次性：返回结构化 JSON
     cid, reply = result
     logger.info("chat_start_completed", conversation_id=cid)
+    return ChatStartResp(conversation_id=cid, reply=reply)
+
+
+@router.post('/start/status')
+def bazi_opening_status(req: ChatStartReq, db: Session = Depends(get_db),
+                        current_user: Optional[User] = Depends(get_current_user_optional)):
+    """Read the current owned source's first request; never generate or charge."""
+    if not current_user:
+        raise HTTPException(401, '请先登录')
+    if req.personal_report:
+        raise HTTPException(400, '请从个人报告页面查询报告状态')
+    from app.services.bazi_opening_request import opening_status
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        return opening_status(db, current_user.id, req)
+    except SQLAlchemyError as error:
+        raise HTTPException(503, '暂时无法查询首次解读，请稍后重新加载。') from error
+
+
+@router.get('/conversations/{conversation_id}/opening')
+def bazi_conversation_opening(conversation_id: str, db: Session = Depends(get_db),
+                              current_user: Optional[User] = Depends(get_current_user_optional)):
+    if not current_user:
+        raise HTTPException(401, '请先登录')
+    from app.services.bazi_opening_request import opening_status
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        return opening_status(db, current_user.id, conversation_id=conversation_id)
+    except ValueError as error:
+        raise HTTPException(404, '会话不存在') from error
+    except SQLAlchemyError as error:
+        raise HTTPException(503, '暂时无法查询首次解读，请稍后重新加载。') from error
+
+
+@router.post('/conversations/{conversation_id}/opening', response_model=ChatStartResp)
+def retry_bazi_opening(conversation_id: str, request: Request, db: Session = Depends(get_db_tx),
+                       current_user: Optional[User] = Depends(get_current_user_optional)):
+    if not current_user:
+        raise HTTPException(401, '请先登录')
+    from app.services.bazi_opening_request import generate_opening
+    from fastapi.responses import StreamingResponse
+    try:
+        result = generate_opening(db, current_user.id, None, request, conversation_id=conversation_id)
+    except ValueError as error:
+        raise HTTPException(404, '会话不存在') from error
+    if isinstance(result, StreamingResponse):
+        return result
+    cid, reply = result
     return ChatStartResp(conversation_id=cid, reply=reply)
 
 
