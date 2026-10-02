@@ -10,11 +10,13 @@ class LiuyaoChatStartReq(BaseModel):
 
 
 class LiuyaoChatSendReq(BaseModel):
+    request_key: Optional[str] = Field(None, pattern=r'^[a-f0-9]{32}$')
     conversation_id: str = Field(..., min_length=1, max_length=64)
     message: str = Field(..., min_length=1, max_length=4000)
 
 
 class LiuyaoChatQuickReq(BaseModel):
+    request_key: Optional[str] = Field(None, pattern=r'^[a-f0-9]{32}$')
     conversation_id: str = Field(..., min_length=1, max_length=64)
     label: str = Field(..., min_length=1, max_length=64)
     prompt: str = Field(..., min_length=1, max_length=4000)

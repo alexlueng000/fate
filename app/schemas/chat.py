@@ -72,6 +72,7 @@ class ChatStartResp(BaseModel):
     reply: str
 
 class ChatSendReq(BaseModel):
+    request_key: Optional[str] = Field(None, pattern=r'^[a-f0-9]{32}$')
     conversation_id: str = Field(..., description="由 /chat/start 返回")
     message: str
     display_message: Optional[str] = Field(None, description="展示/入库用的用户消息，避免保存内部快捷 prompt")

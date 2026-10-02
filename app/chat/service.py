@@ -399,6 +399,7 @@ def send_chat(
     db: Optional[Session] = None,
     display_message: Optional[str] = None,
     task_context: Optional[Dict[str, Any]] = None,
+    turn_reservation: Optional[Dict[str, Any]] = None,
 ):
     """
     Send a message in an existing conversation.
@@ -607,7 +608,7 @@ def send_chat(
                         from app.db import SessionLocal
                         with SessionLocal() as new_db:
                             latency = int((utils.now_ms() - t0))
-                            assistant_msg_id = _save_db_exchange(new_db, db_conv_id, user_id, persisted_user_message, final, latency_ms=latency)
+                            assistant_msg_id = _save_db_exchange(new_db, db_conv_id, user_id, persisted_user_message, final, latency_ms=latency, turn_reservation=turn_reservation)
                             logger.info("messages_persisted", conversation_id=conversation_id, assistant_msg_id=assistant_msg_id)
                     except Exception as e:
                         logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
@@ -653,7 +654,7 @@ def send_chat(
     if db_conv_id and user_id and db:
         try:
             latency = int((utils.now_ms() - t0))
-            _save_db_exchange(db, db_conv_id, user_id, persisted_user_message, reply, latency_ms=latency)
+            _save_db_exchange(db, db_conv_id, user_id, persisted_user_message, reply, latency_ms=latency, turn_reservation=turn_reservation)
         except Exception as e:
             logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
             raise

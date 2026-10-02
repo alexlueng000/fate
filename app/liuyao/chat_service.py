@@ -60,7 +60,7 @@ def _append_completed_history(cid, question, reply):
             pass
 
 
-def _stream_completed_reply(messages, cid, db_conv_id, user_id, question, t0, caller_tag):
+def _stream_completed_reply(messages, cid, db_conv_id, user_id, question, t0, caller_tag, turn_reservation=None):
     def gen():
         normalizer = utils.IncrementalNormalizer(normalize_interval=50)
         received_text = False
@@ -87,7 +87,7 @@ def _stream_completed_reply(messages, cid, db_conv_id, user_id, question, t0, ca
             from app.db import SessionLocal
             with SessionLocal() as session:
                 message_id = save_completed_exchange(session, db_conv_id, user_id, question, final,
-                    latency_ms=int(utils.now_ms() - t0), quota_type="liuyao_chat")
+                    latency_ms=int(utils.now_ms() - t0), quota_type="liuyao_chat", turn_reservation=turn_reservation)
             _append_completed_history(cid, question, final)
             yield sse_pack({"text": final, "replace": True})
             yield sse_pack({"meta": {"message_id": message_id}})
@@ -251,6 +251,7 @@ def _send_streaming_message(
     *,
     display_user_message: Optional[str] = None,
     caller_tag: str = "liuyao_chat_send",
+    turn_reservation=None,
 ):
     """
     内部统一的"发一条用户消息→流式生成→落库"逻辑。
@@ -333,7 +334,7 @@ def _send_streaming_message(
     t0 = utils.now_ms()
 
     if should_stream(request):
-        return _stream_completed_reply(messages, conversation_id, db_conv_id, user_id, persisted_user_msg, t0, caller_tag)
+        return _stream_completed_reply(messages, conversation_id, db_conv_id, user_id, persisted_user_msg, t0, caller_tag, turn_reservation)
 
     # 一次性
     set_caller(caller_tag)
@@ -342,7 +343,7 @@ def _send_streaming_message(
         raise ValueError("AI 服务返回为空，请重试")
     latency = int(utils.now_ms() - t0)
     save_completed_exchange(db, db_conv_id, user_id, persisted_user_msg, reply,
-                            latency_ms=latency, quota_type="liuyao_chat")
+                            latency_ms=latency, quota_type="liuyao_chat", turn_reservation=turn_reservation)
     _append_completed_history(conversation_id, persisted_user_msg, reply)
     return reply
 
@@ -353,6 +354,7 @@ def send_liuyao_chat(
     request: Request,
     user_id: int,
     db: Session,
+    turn_reservation=None,
 ):
     """续聊：用户输入消息，流式返回。"""
     return _send_streaming_message(
@@ -362,6 +364,7 @@ def send_liuyao_chat(
         user_id=user_id,
         db=db,
         caller_tag="liuyao_chat_send",
+        turn_reservation=turn_reservation,
     )
 
 
@@ -372,6 +375,7 @@ def quick_liuyao_chat(
     request: Request,
     user_id: int,
     db: Session,
+    turn_reservation=None,
 ):
     """快捷按钮：管理后台配置的 label + prompt 直接转发到流式对话。"""
     return _send_streaming_message(
@@ -382,6 +386,7 @@ def quick_liuyao_chat(
         user_id=user_id,
         db=db,
         caller_tag="liuyao_chat_quick",
+        turn_reservation=turn_reservation,
     )
 
 

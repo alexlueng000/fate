@@ -470,6 +470,14 @@ def liuyao_chat_send(
 ):
     """续聊：先检查 liuyao_chat 配额，AI 成功生成并保存后再扣减。"""
     _load_chat_hexagram(db, hexagram_id, req.conversation_id, current_user)
+    if req.request_key:
+        from app.services.chat_turn_request import run_turn
+        result = run_turn(db, current_user.id, req.conversation_id, 'liuyao', req.request_key,
+                          {'message': req.message}, request,
+                          lambda reservation: send_liuyao_chat(conversation_id=req.conversation_id, message=req.message,
+                              request=request, user_id=current_user.id, db=db, turn_reservation=reservation))
+        from fastapi.responses import StreamingResponse
+        return result if isinstance(result, StreamingResponse) else LiuyaoChatReply(conversation_id=req.conversation_id, reply=result)
     allowed, msg, _ = QuotaService.check_available(db, current_user.id, "liuyao_chat")
     if not allowed:
         raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
@@ -505,6 +513,14 @@ def liuyao_chat_quick(
     快捷分析：人物画像 / 应期。AI 成功生成并保存后扣减 1 次 liuyao_chat 配额。
     """
     _load_chat_hexagram(db, hexagram_id, req.conversation_id, current_user)
+    if req.request_key:
+        from app.services.chat_turn_request import run_turn
+        result = run_turn(db, current_user.id, req.conversation_id, 'liuyao', req.request_key,
+                          {'label': req.label, 'prompt': req.prompt}, request,
+                          lambda reservation: quick_liuyao_chat(conversation_id=req.conversation_id, label=req.label, prompt=req.prompt,
+                              request=request, user_id=current_user.id, db=db, turn_reservation=reservation))
+        from fastapi.responses import StreamingResponse
+        return result if isinstance(result, StreamingResponse) else LiuyaoChatReply(conversation_id=req.conversation_id, reply=result)
     allowed, msg, _ = QuotaService.check_available(db, current_user.id, "liuyao_chat")
     if not allowed:
         raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")

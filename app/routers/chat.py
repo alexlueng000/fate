@@ -173,21 +173,26 @@ def chat_send(
     """
     logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
     user_id = current_user.id if current_user else None
-    if user_id:
+    if req.request_key and not user_id:
+        raise HTTPException(401, '请先登录')
+    if user_id and not req.request_key:
         allowed, msg, remaining = QuotaService.check_available(db, user_id, "chat")
         if not allowed:
             raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
         logger.info("quota_available", user_id=user_id, remaining=remaining, endpoint="chat_send")
     try:
-        result = send_chat(
-            req.conversation_id,
-            req.message,
-            request,
-            user_id=user_id,
-            db=db,
-            display_message=req.display_message,
-            task_context=req.task_context,
-        )
+        def dispatch(reservation=None):
+            return send_chat(
+                req.conversation_id, req.message, request,
+                user_id=user_id, db=db, display_message=req.display_message, task_context=req.task_context,
+                **({'turn_reservation': reservation} if reservation else {}),
+            )
+        if req.request_key:
+            from app.services.chat_turn_request import run_turn
+            result = run_turn(db, user_id, req.conversation_id, 'bazi', req.request_key,
+                              {'message': req.message, 'display_message': req.display_message, 'task_context': req.task_context}, request, dispatch)
+        else:
+            result = dispatch()
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
 
@@ -196,6 +201,18 @@ def chat_send(
         return result  # type: ignore[return-value]
 
     return ChatSendResp(conversation_id=req.conversation_id, reply=result)
+
+@router.get('/requests/{request_key}')
+def chat_request_status(request_key: str, db: Session = Depends(get_db),
+                        current_user: Optional[User] = Depends(get_current_user_optional)):
+    if not current_user:
+        raise HTTPException(401, '请先登录')
+    from app.services.chat_turn_request import request_status
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        return request_status(db, current_user.id, request_key)
+    except SQLAlchemyError as error:
+        raise HTTPException(503, '暂时无法查询请求状态，请稍后重试。') from error
 
 @router.post("/regenerate", response_model=ChatSendResp)
 def chat_regenerate(

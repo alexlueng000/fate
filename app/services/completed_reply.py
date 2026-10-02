@@ -9,7 +9,7 @@ from app.services.quota import QuotaService
 from app.services.conversation_report import require_personal_report
 
 
-def save_completed_exchange(db, conversation_id, user_id, question, reply, latency_ms=None, *, quota_type="chat", save_profile_report=False, report_reservation=None):
+def save_completed_exchange(db, conversation_id, user_id, question, reply, latency_ms=None, *, quota_type="chat", save_profile_report=False, report_reservation=None, turn_reservation=None):
     if not reply.strip():
         raise ValueError("empty completed reply")
     try:
@@ -32,6 +32,10 @@ def save_completed_exchange(db, conversation_id, user_id, question, reply, laten
                 raise ValueError('报告生成类型不匹配')
             from app.services.personal_report_request import validate_completion
             report_job = validate_completion(db, conversation, report_reservation)
+        turn_job = None
+        if turn_reservation:
+            from app.services.chat_turn_request import validate_completion
+            turn_job = validate_completion(db, conversation, turn_reservation)
         assistant = Message(conversation_id=conversation_id, user_id=user_id,
                             role="assistant", content=reply, latency_ms=latency_ms)
         db.add_all([Message(conversation_id=conversation_id, user_id=user_id,
@@ -50,6 +54,9 @@ def save_completed_exchange(db, conversation_id, user_id, question, reply, laten
         message_id = assistant.id
         if report_job:
             report_job.state = 'succeeded'; report_job.updated_at = datetime.utcnow()
+        if turn_job:
+            turn_job.state = 'succeeded'; turn_job.active_conversation_id = None
+            turn_job.message_id = message_id; turn_job.updated_at = datetime.utcnow()
         db.commit()
         return message_id
     except Exception:
