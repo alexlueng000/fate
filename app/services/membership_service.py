@@ -207,6 +207,12 @@ def apply_paid_product(
     order: Optional[Order] = None,
     source: str = "purchase",
 ) -> tuple[Optional[UserMembership], dict[str, int]]:
+    if product.kind == "consultation":
+        if not order:
+            raise ValueError("问题解读权益必须关联已支付订单")
+        from app.services.consultation_passes import grant_paid
+        grant_paid(db, order)
+        return None, {}
     membership = None
     if product.kind == "subscription":
         membership = create_or_renew_membership_for_order(

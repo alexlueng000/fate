@@ -106,6 +106,9 @@ class EmbeddingBackend:
                 except Exception as e:
                     print({"tfidf_load_failed": str(e)})
             # fallback：临时新建一个（可能需要 fit）
+            if os.getenv("KB_TFIDF_ANALYZER") == "char":
+                # Chinese has no whitespace word boundaries; persist this analyzer with the index.
+                return TfidfVectorizer(analyzer="char", ngram_range=(2, 4), max_features=50000)
             return TfidfVectorizer(max_features=50000)
 
         # 选择策略

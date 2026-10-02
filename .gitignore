@@ -47,3 +47,10 @@ docs/
 
 # Keep website JSAPI deployment instructions with the implementation.
 !WECHAT_JSAPI.md
+
+# Versioned local consultation rollout guide and generated split indexes.
+!docs/
+docs/*
+!docs/stage-consultation-plan.md
+kb_index/bazi/
+kb_index/liuyao/

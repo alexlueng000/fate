@@ -56,6 +56,11 @@ def _create_order(
     不在此函数内 commit；调用方可用 get_db_tx() 自动提交或手动提交。
     """
     out_trade_no = _alloc_unique_out_trade_no(db)
+    if product.kind == "consultation":
+        if not settings.consultation_enabled:
+            raise ValueError("问题解读尚未开放购买")
+        from app.services.consultation_passes import product_terms
+        product_terms(product)
     order = Order(
         user_id=user.id,
         product_id=product.id,
@@ -67,6 +72,9 @@ def _create_order(
     db.add(order)
     try:
         db.flush()  # 让唯一索引/约束在当前事务中立即生效，获得 order.id
+        if product.kind == "consultation":
+            from app.services.consultation_passes import prepare_order
+            prepare_order(db, order, product)
         return order
     except IntegrityError:
         # 可能极小概率 out_trade_no 撞唯一索引：重试一次
@@ -82,6 +90,9 @@ def _create_order(
         )
         db.add(order)
         db.flush()
+        if product.kind == "consultation":
+            from app.services.consultation_passes import prepare_order
+            prepare_order(db, order, product)
         return order
 
 

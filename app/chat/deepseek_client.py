@@ -297,6 +297,7 @@ def call_deepseek_stream(
     model: Optional[str] = None,
     *,
     thinking: Optional[bool] = None,
+    require_complete: bool = False,
 ) -> Iterator[str]:
     """
     Yield incremental content from DeepSeek's OpenAI-compatible SSE response.
@@ -336,6 +337,7 @@ def call_deepseek_stream(
             content_chunk_count = 0
             content_char_count = 0
             finish_reasons: List[str] = []
+            saw_done = False
             delta_keys_seen: set[str] = set()
 
             try:
@@ -355,7 +357,10 @@ def call_deepseek_stream(
                         if not line.startswith("data:"):
                             continue
                         data = line[5:].strip()
-                        if not data or data == "[DONE]":
+                        if data == "[DONE]":
+                            saw_done = True
+                            break
+                        if not data:
                             continue
                         sse_line_count += 1
                         try:
@@ -394,6 +399,8 @@ def call_deepseek_stream(
                             f"empty stream response, sse_line_count={sse_line_count}, "
                             f"finish_reasons={finish_reasons}, delta_keys={sorted(delta_keys_seen)}"
                         )
+                    if require_complete and (not saw_done or "stop" not in finish_reasons or "length" in finish_reasons):
+                        raise DeepSeekEmptyResponseError("incomplete paid response: missing stop or completion marker")
                 success = True
                 _update_prompt_log(
                     prompt_log_path,

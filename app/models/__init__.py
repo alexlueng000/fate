@@ -26,6 +26,7 @@ from .relationship_progress import RelationshipProgress
 from .user_event import UserEvent
 from .guest_analysis import GuestAnalysis
 from .guest_liuyao import GuestLiuyao
+from .consultation import ConsultationPass, ConsultationRequest
 
 
 __all__ = [

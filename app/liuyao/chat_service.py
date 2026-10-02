@@ -30,6 +30,7 @@ from app.chat.deepseek_client import (
 )
 from app.chat.markdown_utils import normalize_markdown
 from app.chat.rag import retrieve_kb
+from app.chat.consultation import bounded_history, consultation_context
 from app.chat.sse import should_stream, sse_pack, sse_response
 from app.chat.store import append_history, get_conv, set_conv
 from app.models.chat import Conversation, Message
@@ -124,7 +125,7 @@ def _build_messages(
     recent_n: int = 10,
 ) -> List[dict]:
     msgs: List[dict] = [{"role": "system", "content": composed_system}]
-    msgs.extend(history[-recent_n:])
+    msgs.extend(bounded_history(history, recent_n))
     if extra_user is not None:
         msgs.append({"role": "user", "content": extra_user})
     return msgs
@@ -144,7 +145,7 @@ def _print_deepseek_payload(tag: str, messages: List[dict]) -> None:
     生产环境可通过环境变量 LIUYAO_PRINT_PAYLOAD=0 关闭。
     """
     import os
-    if os.getenv("LIUYAO_PRINT_PAYLOAD", "1") == "0":
+    if os.getenv("LIUYAO_PRINT_PAYLOAD", "0") == "0":
         return
     sep = "=" * 88
     total = sum(len(m.get("content", "")) for m in messages)
@@ -202,6 +203,7 @@ def start_liuyao_chat(
     })
 
     messages = _build_messages(system_prompt, [], extra_user=opening_user_msg)
+    messages[1:1] = consultation_context(db, task_context, [])
     _print_deepseek_payload("start", messages)
 
     if should_stream(request):
@@ -392,6 +394,7 @@ def _send_streaming_message(
     persisted_user_msg = display_user_message or user_message
 
     messages = _build_messages(composed_system, history, extra_user=user_message)
+    messages[1:1] = consultation_context(db, conv.get("task_context"), history)
     _print_deepseek_payload(caller_tag, messages)
 
     t0 = utils.now_ms()

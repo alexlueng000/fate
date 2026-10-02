@@ -98,6 +98,9 @@ def simulate_payment(
     - 不走真实微信/支付宝渠道；transaction_id 形如 sim_<order_id>
     - 任意登录用户均可调用（生产环境收紧策略请见 §5b）
     """
+    from app.config import settings
+    if settings.app_env != "development" or not settings.allow_simulated_payments:
+        raise HTTPException(status_code=404, detail="Not found")
     product = get_by_code(db, body.product_code, active_only=True)
     if not product:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架")

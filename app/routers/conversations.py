@@ -318,6 +318,8 @@ def delete_conversations(
     rows = db.scalars(_conversation_type_query(user_id, type)).all()
     deleted = len(rows)
     for conv in rows:
+        from app.services.consultation_passes import erase_conversation
+        erase_conversation(db, conv.id)
         db.delete(conv)
     db.commit()
     return DeleteConversationsResp(deleted=deleted)
@@ -406,6 +408,8 @@ def delete_conversation(
     conv = db.get(Conversation, conversation_id)
     if not conv or conv.user_id != user_id:
         raise HTTPException(status_code=404, detail="会话不存在")
+    from app.services.consultation_passes import erase_conversation
+    erase_conversation(db, conv.id)
     db.delete(conv)
     db.commit()
 

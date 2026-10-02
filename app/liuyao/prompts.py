@@ -3,6 +3,7 @@
 """
 from __future__ import annotations
 
+import json
 from typing import Iterable, List, Optional
 
 from app.models.liuyao import LiuyaoHexagram
@@ -60,6 +61,10 @@ def build_hexagram_context(hexagram: LiuyaoHexagram) -> str:
         segments.append(f"- 神煞：{hexagram.shensha}")
     if hexagram.lunar_date:
         segments.append(f"- 农历：{hexagram.lunar_date}")
+    for label, value in (("本卦六爻（初爻至上爻）", hexagram.lines), ("变卦六爻（初爻至上爻）", getattr(hexagram, "change_lines", None))):
+        raw = value.get("lines") if isinstance(value, dict) else None
+        if isinstance(raw, list) and raw:
+            segments.append(f"- {label}：" + json.dumps(raw[:6], ensure_ascii=False))
     return "\n".join(segments)
 
 

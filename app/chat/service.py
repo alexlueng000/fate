@@ -19,7 +19,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .markdown_utils import normalize_markdown
-from .rag import retrieve_kb
+from .rag import retrieve_kb, resolve_index_dir
+from .consultation import bounded_history, consultation_context
 from .deepseek_client import call_deepseek, call_deepseek_stream, set_caller
 from .sse import should_stream, sse_pack, sse_response
 from .store import get_conv, set_conv, append_history, clear_history
@@ -28,7 +29,7 @@ from app.core.logging import get_logger
 
 logger = get_logger("chat")
 
-DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index_bazi"))
+DEFAULT_KB_INDEX = resolve_index_dir("bazi")
 
 
 # ===================== 数据库持久化辅助函数 =====================
@@ -549,7 +550,8 @@ def send_chat(
             messages.append({"role": "user", "content": paipan_context})
             messages.append({"role": "assistant", "content": "好的，我已收到您的命盘信息，请问您想了解什么？"})
 
-    messages.extend(history[-recentN:])
+    messages.extend(consultation_context(db, conv.get("task_context"), history))
+    messages.extend(bounded_history(history, recentN))
     messages.append({"role": "user", "content": message})
 
     logger.debug("chat_send_prompt", conversation_id=conversation_id, message=message)
@@ -731,9 +733,11 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         composed = composed + bazi_anchor
 
     recentN = 10
-    trimmed_history = retry_history[-recentN:]
     messages = [{"role": "system", "content": composed}]
-    messages.extend(trimmed_history)
+    if (conv.get("task_context") or {}).get("taskType") == "career":
+        with utils.db_session() as context_db:
+            messages.extend(consultation_context(context_db, conv.get("task_context"), retry_history))
+    messages.extend(bounded_history(retry_history, recentN))
 
     set_caller("regenerate")
     reply = normalize_markdown(call_deepseek(messages))

@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # -----------------------------
     # 当前唯一商品编码；与种子数据保持一致
     single_product_code: str = "REPORT_UNLOCK"
+    allow_simulated_payments: bool = False
+    consultation_enabled: bool = False
     # 开发态固定 openid，配合 js_code=dev 登录
     dev_openid: str = "dev_openid"
 

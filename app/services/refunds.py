@@ -98,6 +98,20 @@ def finalize_successful_refund(db: Session, *, refund: Refund) -> bool:
     if refund.order.status == "REFUNDED":
         return True
 
+    if refund.order.product.kind == "consultation":
+        from app.services.consultation_passes import revoke
+        try:
+            revoke(db, refund.order_id)
+        except ValueError as exc:
+            refund.failure_code = "ENTITLEMENT_TRACE_MISSING"
+            refund.failure_message = str(exc)
+            return False
+        refund.order.status = "REFUNDED"
+        refund.failure_code = None
+        refund.failure_message = None
+        db.flush()
+        return True
+
     purchase_ledgers = list(
         db.execute(
             select(QuotaLedger)

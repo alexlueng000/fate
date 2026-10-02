@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
@@ -70,6 +70,15 @@ def get_latest_career_progress(
     )
 
 
+@router.get("", response_model=list[CareerProgressResponse])
+def list_career_progress(
+    task_id: str = Query(min_length=1, max_length=128),
+    user_id: int = Depends(get_current_user_or_401),
+    db: Session = Depends(get_db),
+):
+    return db.query(CareerProgress).filter(CareerProgress.user_id == user_id, CareerProgress.task_id == task_id).order_by(desc(CareerProgress.id)).limit(50).all()
+
+
 @router.post("", response_model=CareerProgressResponse, status_code=status.HTTP_201_CREATED)
 def create_career_progress(
     data: CareerProgressCreate,
@@ -77,6 +86,8 @@ def create_career_progress(
     db: Session = Depends(get_db),
 ):
     _validate_task_context(data.task_context)
+    if not data.content.strip():
+        raise HTTPException(status_code=422, detail="请填写行动或复盘内容")
     record = CareerProgress(
         user_id=user_id,
         task_id=data.task_id,
