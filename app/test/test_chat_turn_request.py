@@ -280,3 +280,43 @@ def test_stream_services_commit_attempt_with_answer_or_release_failed_attempt(tu
         assert request_status(db, 1, KEY)['state'] == ('retryable' if failure else 'succeeded')
     assert ('[DONE]' in body) == (not failure)
     assert stats(turns, 'chat' if kind == 'bazi' else 'liuyao_chat') == ((0, 0) if failure else (1, 2))
+
+
+@pytest.mark.parametrize('kind,cid', [('bazi', 1), ('liuyao', 2)])
+def test_long_saved_conversation_chapter_followup_uses_original_report_after_cache_loss(turns, monkeypatch, kind, cid):
+    from app.chat import service as bazi
+    from app.liuyao import chat_service as liuyao
+    from app.services.conversation_report import PERSONAL_TITLES
+    service = bazi if kind == 'bazi' else liuyao
+    original = ('\n\n'.join(f'### {title}\n\n独有原报告内容：{title}' for title in PERSONAL_TITLES)
+                if kind == 'bazi' else '### 核心观察\n独有原报告观察\n### 分析依据\n独有原报告依据\n### 现实建议\n独有原报告建议')
+    with turns() as db:
+        db.add_all([Message(conversation_id=cid, user_id=1, role='user', content='原始问题'),
+                    Message(conversation_id=cid, user_id=1, role='assistant', content=original)])
+        db.flush()
+        for i in range(20):
+            db.add(Message(conversation_id=cid, user_id=1, role='user' if i % 2 == 0 else 'assistant', content=f'后续消息 {i}'))
+        db.commit()
+    # Deliberately stale memory: service must use owned persisted history.
+    monkeypatch.setattr(service, 'get_conv', lambda _: {'kind': kind, 'user_id': 1, 'db_conv_id': cid, 'history': [], 'pinned': 'configured prompt'})
+    monkeypatch.setattr(service, 'should_stream', lambda _: False)
+    monkeypatch.setattr(service, 'consultation_context', lambda *_: [])
+    monkeypatch.setattr(bazi.utils, 'load_system_prompt_from_db', lambda: 'configured prompt')
+    monkeypatch.setattr(bazi.utils, 'build_full_system_prompt', lambda *_, **__: 'configured prompt')
+    calls = []
+    def provider(messages, **_):
+        calls.append(messages)
+        assert {'role': 'assistant', 'content': original} in messages
+        assert sum(m['content'] == original for m in messages) == 1
+        assert {'role': 'user', 'content': '原始问题'} in messages
+        assert {'role': 'assistant', 'content': '后续消息 19'} in messages
+        assert messages[-1] == {'role': 'user', 'content': '报告中的这一节是什么意思？'}
+        return '这是对原报告章节的追问回复。'
+    monkeypatch.setattr(service, 'call_deepseek', provider)
+    with turns() as db:
+        method = bazi.send_chat if kind == 'bazi' else liuyao.send_liuyao_chat
+        method(f'{kind}_conv_{cid}', '报告中的这一节是什么意思？', None, user_id=1, db=db)
+    assert len(calls) == 1
+    with turns() as db:
+        saved = list(db.scalars(select(Message).where(Message.conversation_id == cid).order_by(Message.id)))
+        assert saved[1].content == original and len(saved) == 24

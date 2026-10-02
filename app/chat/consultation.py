@@ -16,8 +16,15 @@ def user_facts(context: Any) -> dict[str, str]:
 
 
 def bounded_history(history: list[dict], recent: int = 10) -> list[dict]:
-    """Retain the original question as a user message, without inventing a summary."""
+    """Keep the original question/report plus recent turns, without a summary.
+
+    The reader opens the first complete report even after alternatives and many
+    follow-ups. Keep that exact assistant source too; it is an earlier AI answer,
+    never a user fact or instruction.
+    """
+    from app.services.conversation_report import report_sections
     valid = [m for m in history if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)]
+    original_report = next((m for m in valid if m['role'] == 'assistant' and report_sections(m['content'])), None)
     # Consecutive assistant messages are saved alternatives from regeneration.
     # Keep all originals in the archive, but use the latest answer in the prompt.
     current = []
@@ -27,11 +34,14 @@ def bounded_history(history: list[dict], recent: int = 10) -> list[dict]:
         else:
             current.append(message)
     valid = current
-    tail = valid[-recent:]
-    first = next((m for m in valid[:-recent] if m["role"] == "user"), None)
-    if first:
-        return [{"role": "user", "content": first["content"][:4000]}, *tail]
-    return tail
+    tail = valid[-max(1, recent):]
+    first = next((m for m in valid if m["role"] == "user"), None)
+    pinned = []
+    if first and not any(m is first for m in tail):
+        pinned.append({"role": "user", "content": first["content"][:4000]})
+    if original_report and not any(m is original_report for m in tail):
+        pinned.append({"role": "assistant", "content": original_report['content']})
+    return [*pinned, *tail]
 
 
 def consultation_context(db, context: Any, history: list[dict]) -> list[dict]:

@@ -1,4 +1,6 @@
 from app.chat.consultation import bounded_history, user_facts
+from app.services.conversation_report import PERSONAL_TITLES
+import pytest
 
 
 def test_preserves_original_user_question_outside_recent_window():
@@ -31,3 +33,28 @@ def test_liuyao_prompt_keeps_computed_line_details():
     result = build_hexagram_context(hexagram)
     assert '子孙' in result and '"dizhi": "子"' in result
     assert '变卦六爻' in result and '"dizhi": "丑"' in result
+
+
+@pytest.mark.parametrize('titles', [PERSONAL_TITLES, ['核心观察', '分析依据', '现实建议']])
+def test_chapter_questions_keep_the_exact_original_report_outside_recent_window(titles):
+    original = {'role': 'assistant', 'content': '\n\n'.join(f'### {title}\n\n原始内容：{title}' for title in titles)}
+    question = {'role': 'user', 'content': '最初的问题与出生信息'}
+    recent = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': f'后续交流 {i}'} for i in range(20)]
+    result = bounded_history([question, original, *recent])
+    assert result == [question, original, *recent[-10:]]
+    assert user_facts({'taskType': 'career', 'facts': {'topic': question['content']}, 'summary': original['content']}) == {'topic': question['content']}
+
+
+def test_regenerated_report_does_not_replace_the_readers_first_complete_source():
+    original = {'role': 'assistant', 'content': '### 核心观察\n原观察\n### 分析依据\n原依据\n### 现实建议\n原建议'}
+    alternative = {'role': 'assistant', 'content': original['content'].replace('原', '替代')}
+    question = {'role': 'user', 'content': '原问题'}
+    assert bounded_history([question, original, alternative, {'role': 'user', 'content': '报告这节什么意思？'}], 2) == [question, original, alternative, {'role': 'user', 'content': '报告这节什么意思？'}]
+    assert bounded_history([question, original]) == [question, original]
+
+
+def test_incomplete_or_user_supplied_chapters_are_not_promoted_to_saved_ai_report():
+    report = '### 核心观察\n观察\n### 分析依据\n依据\n### 现实建议\n建议'
+    history = [{'role': 'user', 'content': report}, {'role': 'assistant', 'content': '### 核心观察\n半截'}]
+    tail = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': str(i)} for i in range(20)]
+    assert bounded_history([*history, *tail]) == [history[0], *tail[-10:]]
