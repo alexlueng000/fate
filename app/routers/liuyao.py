@@ -415,6 +415,19 @@ def _load_user_hexagram(db: Session, hexagram_id: str, user: User) -> LiuyaoHexa
     return hexagram
 
 
+def _load_chat_hexagram(db: Session, hexagram_id: str, conversation_id: str, user: User):
+    """A URL must refer to the same owned hexagram as the chat it continues."""
+    from app.services.conversation_actions import owned_conversation
+    hexagram = _load_user_hexagram(db, hexagram_id, user)
+    try:
+        conversation = owned_conversation(db, conversation_id, user.id, 'liuyao')
+    except ValueError as error:
+        raise HTTPException(404, '会话不存在') from error
+    if conversation.liuyao_hexagram_id != hexagram.id:
+        raise HTTPException(404, '会话不存在')
+    return hexagram
+
+
 @router.post("/{hexagram_id}/chat/start")
 def liuyao_chat_start(
     hexagram_id: str,
@@ -456,7 +469,7 @@ def liuyao_chat_send(
     current_user: User = Depends(get_current_user),
 ):
     """续聊：先检查 liuyao_chat 配额，AI 成功生成并保存后再扣减。"""
-    _load_user_hexagram(db, hexagram_id, current_user)
+    _load_chat_hexagram(db, hexagram_id, req.conversation_id, current_user)
     allowed, msg, _ = QuotaService.check_available(db, current_user.id, "liuyao_chat")
     if not allowed:
         raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
@@ -491,7 +504,7 @@ def liuyao_chat_quick(
     """
     快捷分析：人物画像 / 应期。AI 成功生成并保存后扣减 1 次 liuyao_chat 配额。
     """
-    _load_user_hexagram(db, hexagram_id, current_user)
+    _load_chat_hexagram(db, hexagram_id, req.conversation_id, current_user)
     allowed, msg, _ = QuotaService.check_available(db, current_user.id, "liuyao_chat")
     if not allowed:
         raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")

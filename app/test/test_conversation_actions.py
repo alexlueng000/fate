@@ -238,3 +238,46 @@ def test_regeneration_cannot_use_another_hexagram_for_same_account(sessions, pro
         with pytest.raises(ValueError, match='会话不存在'):
             liuyao.regenerate_liuyao_chat('liuyao_conv_2', user_id=1, db=db, expected_hexagram_id=999)
     assert calls == []
+
+
+@pytest.mark.parametrize('endpoint', ['chat', 'chat/quick'])
+@pytest.mark.parametrize('cid', ['liuyao_conv_2', 'bazi_conv_1', 'liuyao_conv_999'])
+def test_follow_up_url_must_match_owned_conversation_before_quota_or_model(sessions, provider, monkeypatch, endpoint, cid):
+    from app.routers import liuyao as api
+    with sessions() as db:
+        db.add(LiuyaoHexagram(id=9, user_id=1, hexagram_id='different-owned-hex', question='另一个问题', method='number', timestamp=datetime(2026, 10, 3)))
+        db.commit()
+    def must_not_run(*_, **__): raise AssertionError('invalid context must not invoke quota/model')
+    monkeypatch.setattr(api.QuotaService, 'check_available', must_not_run)
+    monkeypatch.setattr(api, 'send_liuyao_chat', must_not_run)
+    monkeypatch.setattr(api, 'quick_liuyao_chat', must_not_run)
+    app = FastAPI(); app.include_router(api.router)
+    def dependency():
+        with sessions() as db: yield db
+    app.dependency_overrides[get_db_tx] = dependency
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1)
+    payload = {'conversation_id': cid, 'message': '继续问'} if endpoint == 'chat' else {'conversation_id': cid, 'label': '分析', 'prompt': '继续分析'}
+    with TestClient(app) as client:
+        response = client.post(f'/liuyao/different-owned-hex/{endpoint}', json=payload)
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize('endpoint', ['chat', 'chat/quick'])
+def test_matching_hexagram_continues_the_original_owned_conversation(sessions, monkeypatch, endpoint):
+    from app.routers import liuyao as api
+    received = []
+    def reply(**kwargs):
+        received.append(kwargs); return '已收到原问题的追问。'
+    monkeypatch.setattr(api, 'send_liuyao_chat', reply)
+    monkeypatch.setattr(api, 'quick_liuyao_chat', reply)
+    monkeypatch.setattr(api.QuotaService, 'check_available', lambda *_, **__: (True, '', 1))
+    app = FastAPI(); app.include_router(api.router)
+    def dependency():
+        with sessions() as db: yield db
+    app.dependency_overrides[get_db_tx] = dependency
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=1)
+    payload = {'conversation_id': 'liuyao_conv_2', 'message': '继续问'} if endpoint == 'chat' else {'conversation_id': 'liuyao_conv_2', 'label': '分析', 'prompt': '继续分析'}
+    with TestClient(app) as client:
+        response = client.post(f'/liuyao/saved-hex/{endpoint}', json=payload)
+    assert response.status_code == 200 and response.json()['reply'] == '已收到原问题的追问。'
+    assert len(received) == 1 and received[0]['conversation_id'] == 'liuyao_conv_2' and received[0]['user_id'] == 1
