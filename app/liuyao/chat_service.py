@@ -186,6 +186,7 @@ def start_liuyao_chat(
     user_id: int,
     db: Session,
     task_context: Optional[Dict[str, Any]] = None,
+    turn_reservation=None,
 ):
     """
     开始六爻对话：
@@ -210,7 +211,14 @@ def start_liuyao_chat(
     system_prompt = build_system_prompt(hexagram, kb_passages, base_prompt=base_prompt)
     opening_user_msg = build_opening_user_message(hexagram)
 
-    db_conv_id = _create_db_conversation(db, user_id, hexagram, task_context=task_context)
+    if turn_reservation:
+        saved = db.get(Conversation, turn_reservation['conversation_id'])
+        if not saved or saved.user_id != user_id or saved.liuyao_hexagram_id != hexagram.id:
+            raise HTTPException(404, '会话不存在')
+        db_conv_id = saved.id
+        task_context = saved.task_context
+    else:
+        db_conv_id = _create_db_conversation(db, user_id, hexagram, task_context=task_context)
     cid = f"liuyao_conv_{db_conv_id}"
 
     set_conv(cid, {
@@ -228,7 +236,7 @@ def start_liuyao_chat(
     _print_deepseek_payload("start", messages)
 
     if should_stream(request):
-        return _stream_completed_reply(messages, cid, db_conv_id, user_id, opening_user_msg, t0, "liuyao_chat_start")
+        return _stream_completed_reply(messages, cid, db_conv_id, user_id, opening_user_msg, t0, "liuyao_chat_start", turn_reservation)
 
     # 一次性
     set_caller("liuyao_chat_start")
@@ -237,7 +245,7 @@ def start_liuyao_chat(
         raise ValueError("AI 服务返回为空，请重试")
     latency = int(utils.now_ms() - t0)
     save_completed_exchange(db, db_conv_id, user_id, opening_user_msg, reply,
-                            latency_ms=latency, quota_type="liuyao_chat")
+                            latency_ms=latency, quota_type="liuyao_chat", turn_reservation=turn_reservation)
     _append_completed_history(cid, opening_user_msg, reply)
     return cid, reply
 

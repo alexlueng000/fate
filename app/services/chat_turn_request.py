@@ -123,11 +123,16 @@ def mark_failed(db, reservation):
 
 
 def run_turn(db, user_id, cid, kind, key, payload, request, runner):
-    from app.chat.sse import sse_pack, sse_response, should_stream
     try:
         prepared = reserve_turn(db, user_id, cid, kind, key, payload)
     except SQLAlchemyError as error:
         raise HTTPException(503, '请求保存服务暂不可用，请稍后重试。') from error
+    return execute_prepared_turn(db, prepared, key, request, runner)
+
+
+def execute_prepared_turn(db, prepared, key, request, runner):
+    """Run/replay an atomically reserved turn, including protected openings."""
+    from app.chat.sse import sse_pack, sse_response, should_stream
     if prepared['state'] == 'pending':
         raise HTTPException(409, '这个问题正在生成，请查询请求状态后继续。')
     if prepared['state'] == 'succeeded':

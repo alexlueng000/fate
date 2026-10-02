@@ -29,6 +29,7 @@ from .guest_liuyao import GuestLiuyao
 from .consultation import ConsultationPass, ConsultationRequest
 from .personal_report_request import PersonalReportRequest
 from .chat_turn_request import ChatTurnRequest
+from .liuyao_opening_request import LiuyaoOpeningRequest
 
 
 __all__ = [

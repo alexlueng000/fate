@@ -439,25 +439,25 @@ def liuyao_chat_start(
     """
     开启六爻多轮对话：先检查 liuyao_chat 配额，AI 成功生成并保存后再扣减。
     """
-    hexagram = _load_user_hexagram(db, hexagram_id, current_user)
-
-    allowed, msg, _ = QuotaService.check_available(db, current_user.id, "liuyao_chat")
-    if not allowed:
-        raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
-
-    result = start_liuyao_chat(
-        hexagram=hexagram,
-        request=request,
-        user_id=current_user.id,
-        db=db,
-        task_context=req.task_context if req else None,
-    )
+    from app.services.liuyao_opening_request import generate_opening
+    result = generate_opening(db, current_user.id, hexagram_id, req.task_context if req else None, request)
 
     from fastapi.responses import StreamingResponse
     if isinstance(result, StreamingResponse):
         return result
     cid, reply = result
     return LiuyaoChatReply(conversation_id=cid, reply=reply)
+
+
+@router.get("/{hexagram_id}/chat/status")
+def liuyao_opening_status(hexagram_id: str, db: Session = Depends(get_db_tx),
+                          current_user: User = Depends(get_current_user)):
+    from sqlalchemy.exc import SQLAlchemyError
+    from app.services.liuyao_opening_request import opening_status
+    try:
+        return opening_status(db, current_user.id, hexagram_id)
+    except SQLAlchemyError as error:
+        raise HTTPException(503, '首次解读保存服务暂不可用，请稍后重新加载。') from error
 
 
 @router.post("/{hexagram_id}/chat")
