@@ -1,6 +1,14 @@
 # app/chat/markdown_utils.py
 import re
 from typing import List, Tuple
+from app.services.conversation_report import PERSONAL_TITLES, TOPIC_TITLES
+
+_REPORT_HEADINGS = set(PERSONAL_TITLES) | set().union(*TOPIC_TITLES)
+
+
+def _complete_report_heading(line: str) -> bool:
+    match = re.match(r'^ {0,3}###\s+(.+?)\s*#*\s*$', line)
+    return bool(match and match.group(1).replace('\u2060', '').strip() in _REPORT_HEADINGS)
 
 # 保护代码块/行内代码
 _RE_FENCED = re.compile(r"```.*?```", re.DOTALL)
@@ -57,6 +65,15 @@ def _ensure_heading_blocks(s: str) -> str:
             # 确保前一行空行
             if out and out[-1].strip() != "":
                 out.append("")  # 插入空行
+
+            # A canonical section title is already complete. A short paragraph
+            # immediately below it is content, never a broken title fragment.
+            if _complete_report_heading(ln):
+                out.append(ln.rstrip())
+                if i + 1 < n and lines[i + 1].strip():
+                    out.append('')
+                i += 1
+                continue
 
             merged = False
             check_idx = i + 1
@@ -183,7 +200,7 @@ def normalize_markdown(md: str) -> str:
             j = i + 1
             need_balance = _paren_balance(parts[0]) > 0
             seen_blank = False  # 是否已经遇到空行
-            while j < len(lines):
+            while j < len(lines) and not _complete_report_heading(line):
                 nxt = lines[j]
                 stripped = nxt.strip()
                 if stripped == "":

@@ -105,7 +105,8 @@ class QuotaService:
         db: Session,
         user_id: int,
         quota_type: str = "chat",
-        amount: int = 1
+        amount: int = 1,
+        *, commit: bool = True,
     ) -> Tuple[bool, str, int]:
         """
         Check quota without consuming it.
@@ -117,7 +118,8 @@ class QuotaService:
         QuotaService.reset_quota_if_needed(db, quota, commit=False)
         total = quota.total_quota
         remaining = quota.total_quota - quota.used_quota
-        db.commit()
+        if commit:
+            db.commit()
 
         if total == -1:
             return True, "无限制", -1

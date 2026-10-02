@@ -56,6 +56,7 @@ class PaipanPayload(BaseModel):
     solar_date: Optional[str] = Field(None, description="排盘使用的公历日期时间（可能仅经度修正，不含均时差），YYYY-MM-DD HH:MM:SS")
 
 class ChatStartReq(BaseModel):
+    personal_report: bool = False
     paipan: Optional[PaipanPayload] = None
     guest_analysis_public_id: Optional[str] = None
     kb_index_dir: Optional[str] = None

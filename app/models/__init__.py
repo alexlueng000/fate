@@ -27,6 +27,7 @@ from .user_event import UserEvent
 from .guest_analysis import GuestAnalysis
 from .guest_liuyao import GuestLiuyao
 from .consultation import ConsultationPass, ConsultationRequest
+from .personal_report_request import PersonalReportRequest
 
 
 __all__ = [

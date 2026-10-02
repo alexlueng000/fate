@@ -61,6 +61,16 @@ def chat_start(
     - 已登录用户必须先建档，从档案读取命盘数据
     """
     user_id = current_user.id if current_user else None
+    if req.personal_report:
+        if not user_id or req.guest_analysis_public_id or req.task_context:
+            raise HTTPException(400, '个人报告需要登录，并使用当前个人档案。')
+        from app.services.personal_report_request import generate_report
+        result = generate_report(db, user_id, request)
+        from fastapi.responses import StreamingResponse
+        if isinstance(result, StreamingResponse):
+            return result
+        cid, reply = result
+        return ChatStartResp(conversation_id=cid, reply=reply)
     profile_id = None
     paipan_data = req.paipan.model_dump() if req.paipan else {}
 
@@ -134,6 +144,20 @@ def chat_start(
     cid, reply = result
     logger.info("chat_start_completed", conversation_id=cid)
     return ChatStartResp(conversation_id=cid, reply=reply)
+
+
+@router.get('/report/status')
+def personal_report_status(db: Session = Depends(get_db),
+                           current_user: Optional[User] = Depends(get_current_user_optional)):
+    if not current_user:
+        raise HTTPException(401, '请先登录')
+    from app.services.personal_report_request import report_status
+    from sqlalchemy.exc import SQLAlchemyError
+    try:
+        return report_status(db, current_user.id)
+    except SQLAlchemyError as error:
+        logger.error('report_status_storage_unavailable', error=str(error), migration='2026-10-03_personal_report_requests.sql')
+        raise HTTPException(503, '暂时无法查询报告状态，请稍后重新加载。') from error
 
 @router.post("", response_model=ChatSendResp)
 def chat_send(
