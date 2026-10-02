@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
+from sqlalchemy import or_, update
 
 from app.models.quota import UserQuota
 from app.models.usage_log import UsageLog
@@ -44,7 +45,7 @@ class QuotaService:
             UserQuota.quota_type == quota_type
         )
         if for_update:
-            query = query.with_for_update()
+            query = query.with_for_update().populate_existing()
         quota = query.first()
 
         if not quota:
@@ -110,26 +111,34 @@ class QuotaService:
         Check quota without consuming it.
         Use this before AI generation; consume only after a non-empty answer is saved.
         """
-        quota = QuotaService.get_or_create_quota(db, user_id, quota_type)
+        # Serialize a due reset, then release the row before the model call.
+        # A stale preflight must not reset a use another request just completed.
+        quota = QuotaService.get_or_create_quota(db, user_id, quota_type, commit=False, for_update=True)
+        QuotaService.reset_quota_if_needed(db, quota, commit=False)
+        total = quota.total_quota
+        remaining = quota.total_quota - quota.used_quota
+        db.commit()
 
-        QuotaService.reset_quota_if_needed(db, quota)
-
-        if quota.total_quota == -1:
+        if total == -1:
             return True, "无限制", -1
 
-        remaining = quota.total_quota - quota.used_quota
         if remaining < amount:
             return False, f"配额不足，剩余 {remaining} 次", remaining
 
         return True, f"剩余 {remaining} 次", remaining
 
     @staticmethod
-    def reset_quota_if_needed(db: Session, quota: UserQuota) -> None:
+    def reset_quota_if_needed(db: Session, quota: UserQuota, *, commit: bool = True) -> None:
         """
         根据 period 重置配额
         """
         if quota.period == "never":
             return
+
+        if commit:
+            # Public quota reads can also trigger resets. Reload under the lock
+            # so an already-reset row never loses a newly committed use.
+            quota = db.query(UserQuota).filter(UserQuota.id == quota.id).with_for_update().populate_existing().one()
 
         now = datetime.utcnow()
         last_reset = quota.last_reset_at or quota.created_at
@@ -148,7 +157,30 @@ class QuotaService:
         if should_reset:
             quota.used_quota = 0
             quota.last_reset_at = now
-            db.commit()
+            if commit:
+                db.commit()
+            else:
+                db.flush()
+
+    @staticmethod
+    def consume_completed(db: Session, user_id: int, quota_type: str, amount: int = 1) -> Tuple[bool, str, int]:
+        """Consume inside the caller's reply transaction, without committing.
+
+        Generation holds no quota lock. The conditional increment protects the
+        last remaining use when independently generated requests finish together.
+        """
+        if amount < 1:
+            raise ValueError("quota amount must be positive")
+        quota = QuotaService.get_or_create_quota(db, user_id, quota_type, commit=False, for_update=True)
+        QuotaService.reset_quota_if_needed(db, quota, commit=False)
+        changed = db.execute(update(UserQuota).where(
+            UserQuota.id == quota.id,
+            or_(UserQuota.total_quota == -1, UserQuota.total_quota - UserQuota.used_quota >= amount),
+        ).values(used_quota=UserQuota.used_quota + amount).execution_options(synchronize_session=False)).rowcount
+        db.refresh(quota)
+        if changed != 1:
+            return False, "剩余次数不足，本次回复未保存且未扣次。", quota.remaining
+        return True, "已记录成功回复", quota.remaining
 
     @staticmethod
     def get_user_stats(db: Session, user_id: int) -> dict:

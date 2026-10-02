@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.deps import get_db, get_current_user
 from app.models import User
@@ -20,6 +21,17 @@ from app.schemas.profile import (
 from app.services.profile_service import ProfileService
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
+
+
+def _report_source(db, profile):
+    if not profile.ai_report:
+        return None
+    from app.models.chat import Conversation, Message
+    return db.execute(select(Message.conversation_id, Message.created_at).join(
+        Conversation, Conversation.id == Message.conversation_id,
+    ).where(Conversation.user_id == profile.user_id, Conversation.profile_id == profile.id,
+            Conversation.liuyao_hexagram_id.is_(None), Message.role == "assistant",
+            Message.content == profile.ai_report).order_by(Message.id.desc()).limit(1)).first()
 
 
 @router.get("/me", response_model=Optional[ProfileResponse])
@@ -37,6 +49,7 @@ def get_my_profile(
     if not profile:
         return None
 
+    report_source = _report_source(db, profile)
     return ProfileResponse(
         id=profile.id,
         user_id=profile.user_id,
@@ -49,6 +62,8 @@ def get_my_profile(
         birth_latitude=profile.birth_latitude,
         bazi_chart=profile.bazi_chart,
         ai_report=profile.ai_report,
+        report_conversation_id=report_source.conversation_id if report_source else None,
+        report_generated_at=report_source.created_at if report_source else None,
         created_at=profile.created_at,
         updated_at=profile.updated_at,
         display_info=profile.display_info,

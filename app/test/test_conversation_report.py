@@ -11,6 +11,7 @@ from app.models.chat import Conversation, Message
 from app.models.profile import UserProfile
 from app.models.conversation_digest import ConversationDigest
 from app.models.message_rating import MessageRating
+from app.models.quota import UserQuota
 from app.routers.conversations import router
 from app.services.conversation_report import report_sections, PERSONAL_TITLES
 
@@ -21,7 +22,7 @@ REPORT = "### 核心观察\n\n先明确工作内容。\n\n### 分析依据\n\n�
 def saved(tmp_path):
     url = f"sqlite:///{tmp_path / 'reports.sqlite'}"
     engine = create_engine(url, connect_args={"check_same_thread": False})
-    for model in (UserProfile, Conversation, Message, ConversationDigest, MessageRating):
+    for model in (UserProfile, Conversation, Message, ConversationDigest, MessageRating, UserQuota):
         model.__table__.create(engine)
     with engine.begin() as connection:
         connection.execute(text('CREATE TABLE app_config (cfg_key TEXT, value_json TEXT, is_active INTEGER, version INTEGER)'))
@@ -112,6 +113,9 @@ def test_headings_in_code_quotes_or_nested_lists_do_not_make_a_report():
     with_questions = REPORT + '\n---SUGGESTED_QUESTIONS---\n应核对哪些条件？\n---END_SUGGESTED_QUESTIONS---'
     assert 'SUGGESTED' not in report_sections(with_questions)[-1]['body']
     assert len(report_sections('\n'.join(f'### {title}\n原始内容\n' for title in PERSONAL_TITLES))) == 7
+    # Existing normalization adds a WORD JOINER to every heading.
+    normalized = '\n'.join(f'### {title}\u2060\n完整原始内容\n' for title in PERSONAL_TITLES)
+    assert [row['title'] for row in report_sections(normalized)] == PERSONAL_TITLES
 
 
 @pytest.mark.parametrize('failure', [None, 'provider', 'save'])

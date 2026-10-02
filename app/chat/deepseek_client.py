@@ -190,6 +190,7 @@ def call_deepseek(
     model: Optional[str] = None,
     *,
     thinking: Optional[bool] = None,
+    require_complete: bool = False,
 ) -> str:
     api_key = _ensure_api_key()
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -228,6 +229,8 @@ def call_deepseek(
                 message = first_choice.get("message") or {}
                 reply = message.get("content") or ""
                 finish_reason = first_choice.get("finish_reason")
+                if require_complete and finish_reason != "stop":
+                    raise DeepSeekEmptyResponseError("incomplete non-stream response")
                 if not reply.strip():
                     raise DeepSeekEmptyResponseError(
                         f"empty non-stream response, finish_reason={finish_reason}, "

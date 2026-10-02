@@ -16,7 +16,7 @@ import time
 import uuid
 from typing import Any, Dict, Iterator, List, Optional
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -35,7 +35,7 @@ from app.chat.sse import should_stream, sse_pack, sse_response
 from app.chat.store import append_history, get_conv, set_conv
 from app.models.chat import Conversation, Message
 from app.models.liuyao import LiuyaoHexagram
-from app.services.quota import QuotaService
+from app.services.completed_reply import save_completed_exchange
 
 from .prompts import (
     build_opening_user_message,
@@ -45,23 +45,65 @@ from .prompts import (
 logger = get_logger("liuyao.chat")
 
 
-def _consume_success_quota(db: Session, user_id: int, conversation_id: str) -> None:
-    """Consume liuyao quota after a non-empty AI answer has been persisted."""
-    allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "liuyao_chat")
-    if not allowed:
-        logger.warning(
-            "liuyao_quota_consume_after_success_failed",
-            user_id=user_id,
-            conversation_id=conversation_id,
-            detail=msg,
-            remaining=remaining,
-        )
+def _append_completed_history(cid, question, reply):
+    try:
+        append_history(cid, "user", question)
+        append_history(cid, "assistant", reply)
+    except Exception as error:
+        # The durable reply is already saved/charged. Cache failure must not
+        # tell the client to retry and accidentally charge another reply.
+        logger.warning("liuyao_cache_update_failed", cid=cid, error=str(error))
+        from app.chat.store import delete_conv
+        try:
+            delete_conv(cid)
+        except Exception:
+            pass
+
+
+def _stream_completed_reply(messages, cid, db_conv_id, user_id, question, t0, caller_tag):
+    def gen():
+        normalizer = utils.IncrementalNormalizer(normalize_interval=50)
+        received_text = False
+        try:
+            yield sse_pack({"meta": {"conversation_id": cid}})
+            set_caller(caller_tag)
+            try:
+                for delta in call_deepseek_stream(messages, thinking=False, require_complete=True):
+                    if not delta:
+                        continue
+                    received_text = True
+                    clean = normalizer.append(delta)
+                    if clean:
+                        yield sse_pack({"text": clean, "replace": True})
+                final = normalizer.finalize()
+            except DeepSeekEmptyResponseError:
+                # A reasoning-only empty stream may use one complete fallback.
+                # A truncated visible answer must fail rather than be replayed.
+                if received_text:
+                    raise
+                final = _fallback_non_stream_reply(messages, caller_tag)
+            if not final.strip():
+                raise ValueError("empty completed reply")
+            from app.db import SessionLocal
+            with SessionLocal() as session:
+                message_id = save_completed_exchange(session, db_conv_id, user_id, question, final,
+                    latency_ms=int(utils.now_ms() - t0), quota_type="liuyao_chat")
+            _append_completed_history(cid, question, final)
+            yield sse_pack({"text": final, "replace": True})
+            yield sse_pack({"meta": {"message_id": message_id}})
+            yield sse_pack("[DONE]")
+        except Exception as error:
+            logger.error("liuyao_reply_failed", cid=cid, error=str(error))
+            quota_error = isinstance(error, HTTPException) and error.status_code == 429
+            yield sse_pack({"error": error.detail if quota_error else "本次解读未能确认完成或保存，请刷新记录后再试。",
+                            "status": 429 if quota_error else 500})
+    return sse_response(gen)
 
 
 def _fallback_non_stream_reply(messages: List[dict], caller_tag: str) -> str:
     """Use non-streaming DeepSeek once when the streaming response contains no text."""
     set_caller(f"{caller_tag}_fallback")
-    reply = _post_process(call_deepseek(messages, thinking=False))
+    reply = _post_process(call_deepseek(messages, thinking=False, require_complete=True))
     if not reply.strip():
         raise RuntimeError(f"empty_{caller_tag}_fallback_reply")
     return reply
@@ -95,27 +137,6 @@ def _create_db_conversation(
     db.commit()
     db.refresh(conv)
     return conv.id
-
-
-def _save_db_message(
-    db: Session,
-    conversation_id: int,
-    user_id: int,
-    role: str,
-    content: str,
-    latency_ms: Optional[int] = None,
-) -> int:
-    msg = Message(
-        conversation_id=conversation_id,
-        user_id=user_id,
-        role=role,
-        content=content,
-        latency_ms=latency_ms,
-    )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return msg.id
 
 
 def _build_messages(
@@ -207,116 +228,17 @@ def start_liuyao_chat(
     _print_deepseek_payload("start", messages)
 
     if should_stream(request):
-        def gen() -> Iterator[bytes]:
-            normalizer = utils.IncrementalNormalizer(normalize_interval=50)
-            final = ""
-            delta_count = 0
-            raw_char_count = 0
-            clean_emit_count = 0
-            clean_char_count = 0
-            try:
-                yield sse_pack(json.dumps(
-                    {"meta": {"conversation_id": cid}}, ensure_ascii=False
-                ))
-                set_caller("liuyao_chat_start")
-                try:
-                    for delta in call_deepseek_stream(messages, thinking=False):
-                        if not delta:
-                            continue
-                        delta_count += 1
-                        raw_char_count += len(delta)
-                        clean = normalizer.append(delta)
-                        if clean:
-                            clean_emit_count += 1
-                            clean_char_count = len(clean)
-                            yield sse_pack(json.dumps(
-                                {"text": clean, "replace": True}, ensure_ascii=False
-                            ))
-                    final = normalizer.finalize()
-                except DeepSeekEmptyResponseError as e:
-                    logger.warning(
-                        "liuyao_start_reasoning_only_stream_fallback",
-                        cid=cid,
-                        db_conv_id=db_conv_id,
-                        error=str(e),
-                    )
-                    final = _fallback_non_stream_reply(messages, "liuyao_chat_start")
-                if not final.strip():
-                    logger.error(
-                        "liuyao_start_empty_reply_diagnostics",
-                        cid=cid,
-                        db_conv_id=db_conv_id,
-                        delta_count=delta_count,
-                        raw_char_count=raw_char_count,
-                        clean_emit_count=clean_emit_count,
-                        last_clean_char_count=clean_char_count,
-                        final_char_count=len(final),
-                        message_count=len(messages),
-                        prompt_chars=sum(len(m.get("content", "")) for m in messages),
-                    )
-                    final = _fallback_non_stream_reply(messages, "liuyao_chat_start")
-                    logger.info(
-                        "liuyao_start_fallback_non_stream_success",
-                        cid=cid,
-                        db_conv_id=db_conv_id,
-                        final_char_count=len(final),
-                    )
-                yield sse_pack(json.dumps(
-                    {"text": final, "replace": True}, ensure_ascii=False
-                ))
-                yield sse_pack("[DONE]")
-            except Exception as e:
-                logger.error("liuyao_start_stream_error", error=str(e))
-                yield sse_pack(json.dumps(
-                    {"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True},
-                    ensure_ascii=False,
-                ))
-                yield sse_pack("[DONE]")
-            finally:
-                if final.strip():
-                    try:
-                        append_history(cid, "user", opening_user_msg)
-                        append_history(cid, "assistant", final)
-                    except Exception as e:
-                        logger.warning("liuyao_append_history_failed", error=str(e))
-
-                    try:
-                        from app.db import SessionLocal
-                        with SessionLocal() as new_db:
-                            latency = int(utils.now_ms() - t0)
-                            _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
-                            msg_id = _save_db_message(
-                                new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency
-                            )
-                            _consume_success_quota(new_db, user_id, cid)
-                            yield sse_pack(json.dumps(
-                                {"meta": {"message_id": msg_id}}, ensure_ascii=False
-                            ))
-                    except Exception as e:
-                        logger.error("liuyao_persist_failed", error=str(e), cid=cid)
-                else:
-                    logger.warning("liuyao_start_empty_reply_not_charged", cid=cid, db_conv_id=db_conv_id)
-
-                logger.info(
-                    "liuyao_start_completed",
-                    cid=cid,
-                    db_conv_id=db_conv_id,
-                    total_ms=utils.now_ms() - t0,
-                )
-
-        return sse_response(gen)
+        return _stream_completed_reply(messages, cid, db_conv_id, user_id, opening_user_msg, t0, "liuyao_chat_start")
 
     # 一次性
     set_caller("liuyao_chat_start")
-    reply = _post_process(call_deepseek(messages, thinking=False))
+    reply = _post_process(call_deepseek(messages, thinking=False, require_complete=True))
     if not reply.strip():
         raise ValueError("AI 服务返回为空，请重试")
-    append_history(cid, "user", opening_user_msg)
-    append_history(cid, "assistant", reply)
     latency = int(utils.now_ms() - t0)
-    _save_db_message(db, db_conv_id, user_id, "user", opening_user_msg)
-    _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
-    _consume_success_quota(db, user_id, cid)
+    save_completed_exchange(db, db_conv_id, user_id, opening_user_msg, reply,
+                            latency_ms=latency, quota_type="liuyao_chat")
+    _append_completed_history(cid, opening_user_msg, reply)
     return cid, reply
 
 
@@ -388,6 +310,17 @@ def _send_streaming_message(
         raise ValueError("无权访问此会话")
 
     db_conv_id = conv.get("db_conv_id")
+    from app.models.chat import Conversation, Message
+    saved = db.get(Conversation, db_conv_id) if db_conv_id else None
+    if not saved or saved.user_id != user_id or not saved.liuyao_hexagram_id:
+        raise ValueError("会话不存在，请先调用 /liuyao/{id}/chat/start")
+    conv = dict(conv)
+    conv["task_context"] = saved.task_context
+    conv["history"] = [
+        {"role": row.role, "content": row.content}
+        for row in db.query(Message).filter_by(conversation_id=db_conv_id)
+        .order_by(Message.id).all() if row.role in ("user", "assistant")
+    ]
     history = conv.get("history") or []
     composed_system = conv.get("pinned") or ""
 
@@ -400,114 +333,17 @@ def _send_streaming_message(
     t0 = utils.now_ms()
 
     if should_stream(request):
-        def gen() -> Iterator[bytes]:
-            normalizer = utils.IncrementalNormalizer(normalize_interval=50)
-            final = ""
-            delta_count = 0
-            raw_char_count = 0
-            clean_emit_count = 0
-            clean_char_count = 0
-            try:
-                yield sse_pack(json.dumps(
-                    {"meta": {"conversation_id": conversation_id}}, ensure_ascii=False
-                ))
-                set_caller(caller_tag)
-                try:
-                    for delta in call_deepseek_stream(messages, thinking=False):
-                        if not delta:
-                            continue
-                        delta_count += 1
-                        raw_char_count += len(delta)
-                        clean = normalizer.append(delta)
-                        if clean:
-                            clean_emit_count += 1
-                            clean_char_count = len(clean)
-                            yield sse_pack(json.dumps(
-                                {"text": clean, "replace": True}, ensure_ascii=False
-                            ))
-                    final = normalizer.finalize()
-                except DeepSeekEmptyResponseError as e:
-                    logger.warning(
-                        "liuyao_send_reasoning_only_stream_fallback",
-                        cid=conversation_id,
-                        db_conv_id=db_conv_id,
-                        caller_tag=caller_tag,
-                        error=str(e),
-                    )
-                    final = _fallback_non_stream_reply(messages, caller_tag)
-                if not final.strip():
-                    logger.error(
-                        "liuyao_send_empty_reply_diagnostics",
-                        cid=conversation_id,
-                        db_conv_id=db_conv_id,
-                        caller_tag=caller_tag,
-                        delta_count=delta_count,
-                        raw_char_count=raw_char_count,
-                        clean_emit_count=clean_emit_count,
-                        last_clean_char_count=clean_char_count,
-                        final_char_count=len(final),
-                        message_count=len(messages),
-                        prompt_chars=sum(len(m.get("content", "")) for m in messages),
-                    )
-                    final = _fallback_non_stream_reply(messages, caller_tag)
-                    logger.info(
-                        "liuyao_send_fallback_non_stream_success",
-                        cid=conversation_id,
-                        db_conv_id=db_conv_id,
-                        caller_tag=caller_tag,
-                        final_char_count=len(final),
-                    )
-                yield sse_pack(json.dumps(
-                    {"text": final, "replace": True}, ensure_ascii=False
-                ))
-                yield sse_pack("[DONE]")
-            except Exception as e:
-                logger.error("liuyao_send_stream_error", error=str(e))
-                yield sse_pack(json.dumps(
-                    {"text": "抱歉，AI 服务暂时不可用，请稍后再试。", "replace": True},
-                    ensure_ascii=False,
-                ))
-                yield sse_pack("[DONE]")
-            finally:
-                if final.strip():
-                    try:
-                        append_history(conversation_id, "user", persisted_user_msg)
-                        append_history(conversation_id, "assistant", final)
-                    except Exception as e:
-                        logger.warning("liuyao_append_history_failed", error=str(e))
-
-                    if db_conv_id:
-                        try:
-                            from app.db import SessionLocal
-                            with SessionLocal() as new_db:
-                                latency = int(utils.now_ms() - t0)
-                                _save_db_message(new_db, db_conv_id, user_id, "user", persisted_user_msg)
-                                msg_id = _save_db_message(
-                                    new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency
-                                )
-                                _consume_success_quota(new_db, user_id, conversation_id)
-                                yield sse_pack(json.dumps(
-                                    {"meta": {"message_id": msg_id}}, ensure_ascii=False
-                                ))
-                        except Exception as e:
-                            logger.error("liuyao_persist_failed", error=str(e), cid=conversation_id)
-                else:
-                    logger.warning("liuyao_send_empty_reply_not_charged", cid=conversation_id, db_conv_id=db_conv_id)
-
-        return sse_response(gen)
+        return _stream_completed_reply(messages, conversation_id, db_conv_id, user_id, persisted_user_msg, t0, caller_tag)
 
     # 一次性
     set_caller(caller_tag)
-    reply = _post_process(call_deepseek(messages, thinking=False))
+    reply = _post_process(call_deepseek(messages, thinking=False, require_complete=True))
     if not reply.strip():
         raise ValueError("AI 服务返回为空，请重试")
-    append_history(conversation_id, "user", persisted_user_msg)
-    append_history(conversation_id, "assistant", reply)
-    if db_conv_id:
-        latency = int(utils.now_ms() - t0)
-        _save_db_message(db, db_conv_id, user_id, "user", persisted_user_msg)
-        _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
-        _consume_success_quota(db, user_id, conversation_id)
+    latency = int(utils.now_ms() - t0)
+    save_completed_exchange(db, db_conv_id, user_id, persisted_user_msg, reply,
+                            latency_ms=latency, quota_type="liuyao_chat")
+    _append_completed_history(conversation_id, persisted_user_msg, reply)
     return reply
 
 
@@ -587,7 +423,7 @@ def regenerate_liuyao_chat(
     _print_deepseek_payload("regenerate", messages)
 
     set_caller("liuyao_chat_regenerate")
-    reply = _post_process(call_deepseek(messages, thinking=False))
+    reply = _post_process(call_deepseek(messages, thinking=False, require_complete=True))
 
     # 把最后一条 assistant 替换掉
     if last_user_idx + 1 < len(history) and history[last_user_idx + 1].get("role") == "assistant":

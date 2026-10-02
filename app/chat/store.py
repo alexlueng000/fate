@@ -35,7 +35,7 @@ def _key(cid: str) -> str:
 def _serialize(data: Dict[str, Any]) -> Dict[str, str]:
     out = {}
     for k, v in data.items():
-        if k in ("history", "paipan"):
+        if k in ("history", "paipan", "task_context"):
             out[k] = json.dumps(v, ensure_ascii=False) if v else ("[]" if k == "history" else "{}")
         else:
             out[k] = "" if v is None else str(v)
@@ -49,7 +49,13 @@ def _deserialize(raw: Dict[str, str]) -> Dict[str, Any]:
             out[k] = json.loads(v) if v else []
         elif k == "paipan":
             out[k] = json.loads(v) if v else {}
-        elif k in ("user_id", "db_conv_id"):
+        elif k == "task_context":
+            try:
+                context = json.loads(v) if v else None
+                out[k] = context if isinstance(context, dict) else None
+            except (ValueError, TypeError):
+                out[k] = None
+        elif k in ("user_id", "db_conv_id", "liuyao_hexagram_id"):
             out[k] = int(v) if v and v not in ("None", "") else None
         else:
             out[k] = None if v in ("None", "") else v

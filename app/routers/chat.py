@@ -108,10 +108,10 @@ def chat_start(
             logger.info("chat_start_with_profile", user_id=user_id, profile_id=profile_id)
 
         # 配额检查
-        allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "chat")
+        allowed, msg, remaining = QuotaService.check_available(db, user_id, "chat")
         if not allowed:
             raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
-        logger.info("quota_consumed", user_id=user_id, remaining=remaining)
+        logger.info("quota_available", user_id=user_id, remaining=remaining)
     else:
         # 未登录用户：使用请求中的临时命盘
         logger.info("chat_start_anonymous", paipan=paipan_data)
@@ -144,16 +144,16 @@ def chat_send(
 ):
     """
     续聊：支持 SSE（根据 Accept 或 ?stream=1）
-    - 已登录用户每次提问都消耗 1 次八字配额（与 /chat/start 一致）
+    - 已登录用户完整回复保存成功后消耗 1 次八字配额（与 /chat/start 一致）
     - 未登录用户暂不限额（内测）
     """
     logger.debug("chat_send_request", conversation_id=req.conversation_id, user_id=current_user.id if current_user else None)
     user_id = current_user.id if current_user else None
     if user_id:
-        allowed, msg, remaining = QuotaService.check_and_consume(db, user_id, "chat")
+        allowed, msg, remaining = QuotaService.check_available(db, user_id, "chat")
         if not allowed:
             raise HTTPException(status_code=429, detail=f"配额已用完：{msg}")
-        logger.info("quota_consumed", user_id=user_id, remaining=remaining, endpoint="chat_send")
+        logger.info("quota_available", user_id=user_id, remaining=remaining, endpoint="chat_send")
     try:
         result = send_chat(
             req.conversation_id,

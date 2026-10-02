@@ -30,7 +30,10 @@ def report_sections(content: str) -> list[dict]:
         elif fence is None:
             match = re.match(r"^###\s+(.+?)\s*#*\s*$", line)
             if match:
-                headings.append((match.group(1).strip(), offset, offset + len(line)))
+                # The legacy Markdown normalizer appends a WORD JOINER to
+                # headings. Ignore it for matching, while retaining raw content.
+                title = match.group(1).replace('\u2060', '').strip()
+                headings.append((title, offset, offset + len(line)))
         offset += len(line)
     titles = [row[0] for row in headings]
     topic = len(titles) == 3 and all(title in allowed for title, allowed in zip(titles, TOPIC_TITLES))
@@ -48,3 +51,9 @@ def first_report(messages):
         if message.role == "assistant" and (sections := report_sections(message.content)):
             return message, sections
     return None
+
+
+def require_personal_report(content: str) -> None:
+    sections = report_sections(content)
+    if [section['title'] for section in sections] != PERSONAL_TITLES:
+        raise ValueError('个人报告章节未完整生成，请重新加载报告确认保存状态。')

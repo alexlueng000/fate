@@ -48,6 +48,8 @@ class ProfileResponse(BaseModel):
     birth_latitude: Optional[float]
     bazi_chart: Optional[dict]
     ai_report: Optional[str] = None
+    report_conversation_id: Optional[int] = None
+    report_generated_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
