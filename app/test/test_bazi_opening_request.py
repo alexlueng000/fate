@@ -17,6 +17,7 @@ from app.models.chat import Conversation, Message
 from app.models.chat_turn_request import ChatTurnRequest
 from app.models.guest_analysis import GuestAnalysis
 from app.models.profile import UserProfile
+from app.models.personal_report_request import PersonalReportRequest
 from app.schemas.chat import ChatStartReq
 from app.services.bazi_opening_request import reserve_opening, opening_status, generate_opening
 from app.services.chat_turn_request import mark_failed
@@ -31,7 +32,7 @@ def _guest_text_for_isolated_sqlite(type_, compiler, **kwargs):
 @pytest.fixture
 def openings(sessions):
     with sessions() as db:
-        for model in (ChatTurnRequest, BaziOpeningRequest, GuestAnalysis):
+        for model in (ChatTurnRequest, BaziOpeningRequest, PersonalReportRequest, GuestAnalysis):
             model.__table__.create(db.get_bind())
         db.add(GuestAnalysis(id=1, public_id='owned-guest', guest_session_id='guest-session', user_id=1,
             status='succeeded', gender='female', birth_date=date(1993, 3, 9), birth_time=time(7), birth_location='上海',

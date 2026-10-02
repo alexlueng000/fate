@@ -26,12 +26,27 @@ def save_completed_exchange(db, conversation_id, user_id, question, reply, laten
         allowed, message, _ = QuotaService.consume_completed(db, user_id, quota_type)
         if not allowed:
             raise HTTPException(status_code=429, detail=message)
+        if report_reservation and report_reservation.get('request_key') and not turn_reservation:
+            turn_reservation = report_reservation
+        profile = None
+        if save_profile_report and conversation.profile_id and quota_type == 'chat':
+            from app.models.profile import UserProfile
+            profile = db.scalar(select(UserProfile).where(
+                UserProfile.id == conversation.profile_id, UserProfile.user_id == user_id,
+            ).with_for_update().execution_options(populate_existing=True))
         report_job = None
         if report_reservation:
             if not save_profile_report or quota_type != 'chat':
                 raise ValueError('报告生成类型不匹配')
             from app.services.personal_report_request import validate_completion
             report_job = validate_completion(db, conversation, report_reservation)
+        elif turn_reservation and profile:
+            from app.models.personal_report_request import PersonalReportRequest
+            shared_job = db.scalar(select(PersonalReportRequest).where(PersonalReportRequest.profile_id == profile.id)
+                                   .with_for_update().execution_options(populate_existing=True))
+            if (shared_job and shared_job.user_id == user_id and shared_job.conversation_id == conversation.id
+                    and shared_job.token == turn_reservation['token']):
+                report_job = shared_job
         turn_job = None
         if turn_reservation:
             from app.services.chat_turn_request import validate_completion
@@ -40,14 +55,12 @@ def save_completed_exchange(db, conversation_id, user_id, question, reply, laten
                             role="assistant", content=reply, latency_ms=latency_ms)
         db.add_all([Message(conversation_id=conversation_id, user_id=user_id,
                             role="user", content=question), assistant])
-        if save_profile_report and conversation.profile_id and quota_type == "chat":
-            from app.models.profile import UserProfile
-            profile = db.scalar(select(UserProfile).where(
-                UserProfile.id == conversation.profile_id, UserProfile.user_id == user_id,
-            ).with_for_update().execution_options(populate_existing=True))
+        if save_profile_report and profile and quota_type == "chat":
             snapshot = conversation.bazi_chart_snapshot or {}
             current = profile.bazi_chart if profile else None
-            if current and current.get("mingpan", current) == snapshot.get("mingpan", snapshot):
+            personal_source = not conversation.task_context and (
+                not turn_reservation or turn_reservation.get('profile_id') == conversation.profile_id)
+            if personal_source and current and current.get("mingpan", current) == snapshot.get("mingpan", snapshot):
                 profile.ai_report = reply
         conversation.updated_at = datetime.utcnow()
         db.flush()

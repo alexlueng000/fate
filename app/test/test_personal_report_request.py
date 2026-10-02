@@ -17,6 +17,8 @@ from app.models.chat import Conversation, Message
 from app.models.profile import UserProfile
 from app.models.quota import UserQuota
 from app.models.personal_report_request import PersonalReportRequest
+from app.models.bazi_opening_request import BaziOpeningRequest
+from app.models.chat_turn_request import ChatTurnRequest
 from app.services.personal_report_request import reserve_report, report_status, mark_failed, generate_report
 from app.services.completed_reply import save_completed_exchange
 from app.services.conversation_report import PERSONAL_TITLES
@@ -30,7 +32,7 @@ REPORT = '\n'.join(f'### {title}\n完整的{title}测试原文。' for title in 
 @pytest.fixture
 def sessions(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'request.sqlite'}", connect_args={'check_same_thread': False, 'timeout': 10})
-    for model in (UserProfile, Conversation, Message, UserQuota, PersonalReportRequest):
+    for model in (UserProfile, Conversation, Message, UserQuota, PersonalReportRequest, ChatTurnRequest, BaziOpeningRequest):
         model.__table__.create(engine)
     factory = sessionmaker(engine)
     with factory() as db:
@@ -89,7 +91,10 @@ def test_completed_job_report_and_charge_commit_together_and_zero_quota_can_repl
 def test_retry_replaces_token_and_late_old_completion_cannot_charge(sessions, reason):
     with sessions() as db: first = reserve_report(db, 1)
     with sessions() as db:
-        if reason == 'expired': db.get(PersonalReportRequest, 1).lease_until = datetime.utcnow() - timedelta(minutes=1); db.commit()
+        if reason == 'expired':
+            db.get(PersonalReportRequest, 1).lease_until = datetime.utcnow() - timedelta(minutes=1)
+            db.get(ChatTurnRequest, (1, first['reservation']['request_key'])).lease_until = datetime.utcnow() - timedelta(minutes=1)
+            db.commit()
         else: mark_failed(db, first['reservation'])
     with sessions() as db: second = reserve_report(db, 1)
     assert first['reservation']['token'] != second['reservation']['token']
@@ -99,7 +104,7 @@ def test_retry_replaces_token_and_late_old_completion_cannot_charge(sessions, re
         mark_failed(db, first['reservation'])
         assert db.get(PersonalReportRequest, 1).state == 'pending'
         complete(db, second)
-    assert counts(sessions) == (1, 2, 2)
+    assert counts(sessions) == (1, 2, 1)  # Retry reuses the common first conversation.
 
 
 def test_profile_edit_during_generation_prevents_charge_and_stale_report(sessions):
@@ -175,7 +180,7 @@ def test_stream_wrapper_marks_failure_or_success_and_retry_is_replay(sessions, p
             assert '[DONE]' in body and 'message_id' in body
             replay = generate_report(db, 1, request)
             assert '[DONE]' in read_stream(replay) and len(calls) == 1
-    assert counts(sessions) == ((0, 0, 2) if failure else (1, 2, 1))
+    assert counts(sessions) == ((0, 0, 1) if failure else (1, 2, 1))
 
 
 def test_pending_http_request_never_calls_provider_and_status_requires_owner(sessions, provider):
@@ -211,7 +216,7 @@ def test_disconnect_before_model_reply_releases_only_its_own_reservation(session
     with sessions() as db:
         assert report_status(db, 1) == {'state': 'failed'}
         assert reserve_report(db, 1)['state'] == 'reserved'
-    assert calls == [] and counts(sessions) == (0, 0, 2)
+    assert calls == [] and counts(sessions) == (0, 0, 1)
 
 
 def test_reservation_transaction_failure_keeps_no_orphan_generation(sessions, monkeypatch):
