@@ -19,6 +19,7 @@ from app.deps import get_current_user_or_401
 from app.models.chat import Conversation, Message
 from app.models.conversation_digest import ConversationDigest
 from app.services.conversation_digest import generate_digest
+from app.services.conversation_report import first_report
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -55,6 +56,7 @@ class ConversationListItem(BaseModel):
     hexagram: Optional[HexagramSummary] = None  # 六爻才有
     task_context: Optional[Dict[str, Any]] = None
     digest: Optional[DigestResponse] = None
+    report_source_message_id: Optional[int] = None
 
 
 class ConversationListResp(BaseModel):
@@ -80,6 +82,28 @@ class ConversationDetailResp(BaseModel):
     profile: Optional[dict] = None       # 八字才有（命盘快照）
     profile_changed: bool = False        # 命盘是否已被用户修改过
     hexagram: Optional[dict] = None      # 六爻才有
+    task_context: Optional[Dict[str, Any]] = None
+
+
+class ReportSectionItem(BaseModel):
+    title: str
+    body: str
+
+
+class ConversationReportResp(BaseModel):
+    conversation_id: int
+    source_message_id: int
+    type: Literal["bazi", "liuyao"]
+    kind: Literal["personal", "topic"]
+    title: str
+    question: Optional[str] = None
+    facts: Dict[str, str]
+    generated_at: datetime
+    content: str
+    sections: List[ReportSectionItem]
+    profile: Optional[dict] = None
+    profile_changed: bool = False
+    hexagram: Optional[dict] = None
     task_context: Optional[Dict[str, Any]] = None
 
 
@@ -253,6 +277,16 @@ def list_conversations(
     digests = {row.conversation_id: row for row in db.scalars(select(ConversationDigest).where(
         ConversationDigest.conversation_id.in_([conv.id for conv in rows])
     )).all()} if rows else {}
+    report_ids = {}
+    if rows:
+        saved_replies = db.scalars(select(Message).where(
+            Message.conversation_id.in_([conv.id for conv in rows]), Message.role == "assistant",
+            or_(Message.content.contains("### 核心观察"), Message.content.contains("### 核心判断"),
+                Message.content.contains("### 个人画像")),
+        ).order_by(Message.id)).all()
+        for message in saved_replies:
+            if message.conversation_id not in report_ids and first_report([message]):
+                report_ids[message.conversation_id] = message.id
     for conv in rows:
         # 取最后一条可展示的 user / assistant 消息预览。
         user_messages = db.scalars(
@@ -300,6 +334,7 @@ def list_conversations(
             hexagram=hexagram_summary,
             task_context=conv.task_context,
             digest=_digest_response(digests.get(conv.id), db, conv.id),
+            report_source_message_id=report_ids.get(conv.id),
         ))
 
     return ConversationListResp(
@@ -396,6 +431,33 @@ def get_conversation(
         profile_changed=profile_changed,
         hexagram=hexagram_data,
         task_context=conv.task_context,
+    )
+
+
+@router.get("/{conversation_id}/report", response_model=ConversationReportResp)
+def get_conversation_report(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    user_id: int = Depends(get_current_user_or_401),
+):
+    # Reuse the owned history view and frozen chart; do not read the live profile.
+    detail = get_conversation(conversation_id, db=db, user_id=user_id)
+    selected = first_report(detail.messages)
+    if not selected:
+        raise HTTPException(status_code=409, detail="这段对话还没有完整报告，可以继续原对话补充信息。")
+    message, sections = selected
+    from app.chat.consultation import user_facts
+    facts = user_facts(detail.task_context)
+    question = facts.get("topic") or (detail.hexagram or {}).get("question")
+    if not question:
+        question = next((row.content for row in detail.messages if row.role == "user" and row.id < message.id), None)
+    return ConversationReportResp(
+        conversation_id=detail.id, source_message_id=message.id, type=detail.type,
+        kind="topic" if len(sections) == 3 else "personal",
+        title=detail.title, question=question, facts=facts,
+        generated_at=message.created_at, content=message.content, sections=sections,
+        profile=detail.profile, profile_changed=detail.profile_changed,
+        hexagram=detail.hexagram, task_context=detail.task_context,
     )
 
 

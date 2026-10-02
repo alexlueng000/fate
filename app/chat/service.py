@@ -67,31 +67,28 @@ def _create_db_conversation(
     return conv.id
 
 
-def _save_db_message(
-    db: Session,
-    conversation_id: int,
-    user_id: int,
-    role: str,
-    content: str,
-    prompt_tokens: int = 0,
-    completion_tokens: int = 0,
-    latency_ms: Optional[int] = None
-) -> int:
-    """保存消息到数据库，返回消息ID"""
-    from app.models.chat import Message
-    msg = Message(
-        conversation_id=conversation_id,
-        user_id=user_id,
-        role=role,
-        content=content,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        latency_ms=latency_ms,
-    )
-    db.add(msg)
-    db.commit()
-    db.refresh(msg)
-    return msg.id
+def _save_db_exchange(db, conversation_id, user_id, question, reply, latency_ms=None):
+    """Commit a completed question/reply pair together before declaring success."""
+    from datetime import datetime
+    from app.models.chat import Conversation, Message
+    if not reply.strip():
+        raise ValueError("empty reply")
+    assistant = Message(conversation_id=conversation_id, user_id=user_id,
+                        role="assistant", content=reply, latency_ms=latency_ms)
+    try:
+        db.add_all([Message(conversation_id=conversation_id, user_id=user_id,
+                            role="user", content=question), assistant])
+        conversation = db.get(Conversation, conversation_id)
+        if not conversation or conversation.user_id != user_id:
+            raise ValueError("conversation unavailable")
+        conversation.updated_at = datetime.utcnow()
+        db.flush()
+        message_id = assistant.id
+        db.commit()
+        return message_id
+    except Exception:
+        db.rollback()
+        raise
 
 
 # ===================== 对话入口 =====================
@@ -216,7 +213,7 @@ def start_chat(
 
                 start_fb = time.perf_counter()
                 set_caller("chat_start")
-                for delta in call_deepseek_stream(messages):
+                for delta in call_deepseek_stream(messages, require_complete=True):
                     if not first_byte_seen:
                         spans["first_byte"] = time.perf_counter() - start_fb
                         first_byte_seen = True
@@ -231,6 +228,8 @@ def start_chat(
 
                 # Final normalization
                 final = normalizer.finalize()
+                if not final.strip():
+                    raise ValueError("empty completed reply")
                 logger.info("chat_start_final_text", cid=cid, raw_chunks=len(normalizer._raw_chunks), length=len(final), preview=final[:200])
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
 
@@ -239,8 +238,8 @@ def start_chat(
 
             except Exception as e:
                 logger.error("start_chat_stream_error", error=str(e))
-                final = "抱歉，本次解读生成失败。你可以刷新页面后重新提问，或稍后再试。"
-                yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
+                yield sse_pack(json.dumps({"error": "本次解读未完成，请重新提问。"}, ensure_ascii=False))
+                return
 
             # 必须在 [DONE] 之前持久化。客户端收到 [DONE] 后会主动结束读取，
             # 若把保存放在生成器 finally 中，连接取消时会留下只有会话、没有消息的空记录。
@@ -249,9 +248,6 @@ def start_chat(
                     spans["streaming"] = time.perf_counter() - start_fb - spans["first_byte"]
 
                 with utils.timer("post", spans):
-                    append_history(cid, "user", opening_user_msg)
-                    append_history(cid, "assistant", final)
-
                     # 数据库持久化（仅登录用户）
                     # 注意：流式响应中原 db 会话已关闭，需要创建新会话
                     if db_conv_id and user_id:
@@ -259,11 +255,14 @@ def start_chat(
                             from app.db import SessionLocal
                             with SessionLocal() as new_db:
                                 latency = int((utils.now_ms() - t0))
-                                _save_db_message(new_db, db_conv_id, user_id, "user", opening_user_msg)
-                                assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                                assistant_msg_id = _save_db_exchange(new_db, db_conv_id, user_id, opening_user_msg, final, latency_ms=latency)
                                 logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id, assistant_msg_id=assistant_msg_id)
                         except Exception as e:
                             logger.error("message_persist_failed", error=str(e), conversation_id=cid)
+                            raise
+
+                    append_history(cid, "user", opening_user_msg)
+                    append_history(cid, "assistant", final)
 
                 total_ms = utils.now_ms() - t0
                 logger.info("chat_completed",
@@ -276,6 +275,8 @@ def start_chat(
                 )
             except Exception as e:
                 logger.error("chat_start_finalize_failed", error=str(e), conversation_id=cid)
+                yield sse_pack(json.dumps({"error": "解读未能确认保存，请刷新记录后再试。"}, ensure_ascii=False))
+                return
 
             if assistant_msg_id:
                 yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
@@ -309,18 +310,19 @@ def start_chat(
             reply = normalize_markdown(reply)
         except Exception:
             pass
-        append_history(cid, "user", opening_user_msg)
-        append_history(cid, "assistant", reply)
-
+        if not reply.strip():
+            raise ValueError("empty completed reply")
         # 数据库持久化（仅登录用户）
         if db_conv_id and user_id and db:
             try:
                 latency = int((utils.now_ms() - t0))
-                _save_db_message(db, db_conv_id, user_id, "user", opening_user_msg)
-                _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
+                _save_db_exchange(db, db_conv_id, user_id, opening_user_msg, reply, latency_ms=latency)
                 logger.info("messages_persisted", conversation_id=cid, db_conv_id=db_conv_id)
             except Exception as e:
                 logger.error("message_persist_failed", error=str(e), conversation_id=cid)
+                raise
+        append_history(cid, "user", opening_user_msg)
+        append_history(cid, "assistant", reply)
 
     total_ms = utils.now_ms() - t0
     logger.info("chat_completed",
@@ -488,17 +490,19 @@ def send_chat(
     # 获取持久化信息
     user_id = conv.get("user_id")
     db_conv_id = conv.get("db_conv_id")
-    if task_context:
+    if db_conv_id and db:
+        from app.models.chat import Conversation
+        db_conv = db.get(Conversation, db_conv_id)
+        if not db_conv or db_conv.user_id != user_id:
+            raise ValueError("会话不存在，请先 /chat/start")
+        # Once attached, the original question/facts belong to this conversation.
+        # A stale browser's task must not rewrite the saved report background.
+        if db_conv.task_context is None and task_context:
+            db_conv.task_context = task_context
+            db.commit()
+        conv["task_context"] = db_conv.task_context
+    elif task_context and not conv.get("task_context"):
         conv["task_context"] = task_context
-        if db_conv_id and db:
-            try:
-                from app.models.chat import Conversation
-                db_conv = db.get(Conversation, db_conv_id)
-                if db_conv and db_conv.user_id == user_id:
-                    db_conv.task_context = task_context
-                    db.commit()
-            except Exception as e:
-                logger.error("task_context_persist_failed", error=str(e), conversation_id=conversation_id)
 
     # 查找本地知识库
     kb_dir = conv.get("kb_index_dir")
@@ -568,7 +572,7 @@ def send_chat(
             try:
                 yield sse_pack(json.dumps({"meta": {"conversation_id": conversation_id}}, ensure_ascii=False))
                 set_caller("chat_send")
-                for delta in call_deepseek_stream(messages):
+                for delta in call_deepseek_stream(messages, require_complete=True):
                     if not delta:
                         continue
                     # Use incremental normalizer
@@ -578,17 +582,16 @@ def send_chat(
 
                 # Final normalization
                 final = normalizer.finalize()
+                if not final.strip():
+                    raise ValueError("empty completed reply")
                 yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
             except Exception as e:
                 logger.error("send_chat_stream_error", error=str(e))
-                final = "抱歉，本次解读生成失败。你可以刷新页面后重新提问，或稍后再试。"
-                yield sse_pack(json.dumps({"text": final, "replace": True}, ensure_ascii=False))
+                yield sse_pack(json.dumps({"error": "本次解读未完成，请重新提问。"}, ensure_ascii=False))
+                return
 
             # 与 start_chat 一致：先保存，再宣告流结束。
             try:
-                append_history(conversation_id, "user", persisted_user_message)
-                append_history(conversation_id, "assistant", final)
-
                 # 数据库持久化（仅登录用户）
                 # 注意：流式响应中原 db 会话已关闭，需要创建新会话
                 if db_conv_id and user_id:
@@ -596,13 +599,17 @@ def send_chat(
                         from app.db import SessionLocal
                         with SessionLocal() as new_db:
                             latency = int((utils.now_ms() - t0))
-                            _save_db_message(new_db, db_conv_id, user_id, "user", persisted_user_message)
-                            assistant_msg_id = _save_db_message(new_db, db_conv_id, user_id, "assistant", final, latency_ms=latency)
+                            assistant_msg_id = _save_db_exchange(new_db, db_conv_id, user_id, persisted_user_message, final, latency_ms=latency)
                             logger.info("messages_persisted", conversation_id=conversation_id, assistant_msg_id=assistant_msg_id)
                     except Exception as e:
                         logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
+                        raise
+                append_history(conversation_id, "user", persisted_user_message)
+                append_history(conversation_id, "assistant", final)
             except Exception as e:
                 logger.error("chat_send_finalize_failed", error=str(e), conversation_id=conversation_id)
+                yield sse_pack(json.dumps({"error": "解读未能确认保存，请刷新记录后再试。"}, ensure_ascii=False))
+                return
 
             if assistant_msg_id:
                 yield sse_pack(json.dumps({"meta": {"message_id": assistant_msg_id}}, ensure_ascii=False))
@@ -632,17 +639,18 @@ def send_chat(
         reply = normalize_markdown(reply)
     except Exception:
         pass
-    append_history(conversation_id, "user", persisted_user_message)
-    append_history(conversation_id, "assistant", reply)
-
+    if not reply.strip():
+        raise ValueError("empty completed reply")
     # 数据库持久化（仅登录用户）
     if db_conv_id and user_id and db:
         try:
             latency = int((utils.now_ms() - t0))
-            _save_db_message(db, db_conv_id, user_id, "user", persisted_user_message)
-            _save_db_message(db, db_conv_id, user_id, "assistant", reply, latency_ms=latency)
+            _save_db_exchange(db, db_conv_id, user_id, persisted_user_message, reply, latency_ms=latency)
         except Exception as e:
             logger.error("message_persist_failed", error=str(e), conversation_id=conversation_id)
+            raise
+    append_history(conversation_id, "user", persisted_user_message)
+    append_history(conversation_id, "assistant", reply)
 
     return reply
 
