@@ -18,6 +18,15 @@ def user_facts(context: Any) -> dict[str, str]:
 def bounded_history(history: list[dict], recent: int = 10) -> list[dict]:
     """Retain the original question as a user message, without inventing a summary."""
     valid = [m for m in history if m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)]
+    # Consecutive assistant messages are saved alternatives from regeneration.
+    # Keep all originals in the archive, but use the latest answer in the prompt.
+    current = []
+    for message in valid:
+        if current and message['role'] == current[-1]['role'] == 'assistant':
+            current[-1] = message
+        else:
+            current.append(message)
+    valid = current
     tail = valid[-recent:]
     first = next((m for m in valid[:-recent] if m["role"] == "user"), None)
     if first:

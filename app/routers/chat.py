@@ -184,10 +184,15 @@ def chat_regenerate(
     """
     user_id = current_user.id if current_user else None
     try:
-        reply = regenerate(req.conversation_id, user_id=user_id)
+        result = regenerate(req.conversation_id, user_id=user_id, db=db, expected_message_id=req.expected_message_id)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
-    return ChatSendResp(conversation_id=req.conversation_id, reply=reply)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error('regeneration_failed', conversation_id=req.conversation_id, error=str(e))
+        raise HTTPException(503, '重新解读暂时未成功，原回答已保留，请稍后重试。')
+    return ChatSendResp(conversation_id=req.conversation_id, **result)
 
 
 @router.post("/simplify")
@@ -203,15 +208,21 @@ def chat_simplify(req: ChatSimplifyReq, request: Request):
 
 
 @router.post("/clear", response_model=ChatOkResp)
-def chat_clear(req: ChatClearReq, db: Session = Depends(get_db)):
+def chat_clear(req: ChatClearReq, db: Session = Depends(get_db),
+               current_user: Optional[User] = Depends(get_current_user_optional)):
     """
-    清空指定会话的历史记录
+    开始空白会话，保留原会话与报告。
     """
     try:
-        clear(req.conversation_id)
+        result = clear(req.conversation_id, user_id=current_user.id if current_user else None, db=db)
     except ValueError as e:
         raise HTTPException(status_code=404 if "会话不存在" in str(e) else 400, detail=str(e))
-    return ChatOkResp(ok=True, conversation_id=req.conversation_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error('clear_failed', conversation_id=req.conversation_id, error=str(e))
+        raise HTTPException(503, '未能开始空白对话，原对话已保留，请稍后重试。')
+    return ChatOkResp(**result)
 
 
 # ===================== WebSocket 端点 =====================

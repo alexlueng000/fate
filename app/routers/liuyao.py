@@ -524,16 +524,23 @@ def liuyao_chat_regenerate(
     current_user: User = Depends(get_current_user),
 ):
     """重新生成上一条 assistant 回复（一次性）。"""
-    _load_user_hexagram(db, hexagram_id, current_user)
+    hexagram = _load_user_hexagram(db, hexagram_id, current_user)
     try:
-        reply = regenerate_liuyao_chat(
+        result = regenerate_liuyao_chat(
             conversation_id=req.conversation_id,
             user_id=current_user.id,
             db=db,
+            expected_message_id=req.expected_message_id,
+            expected_hexagram_id=hexagram.id,
         )
     except ValueError as e:
         raise HTTPException(
             status_code=404 if "会话不存在" in str(e) else 400,
             detail=str(e),
         )
-    return LiuyaoChatReply(conversation_id=req.conversation_id, reply=reply)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error('regeneration_failed', conversation_id=req.conversation_id, error=str(e))
+        raise HTTPException(503, '重新解读暂时未成功，原回答已保留，请稍后重试。')
+    return LiuyaoChatReply(conversation_id=req.conversation_id, **result)

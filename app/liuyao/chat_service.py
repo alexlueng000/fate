@@ -29,7 +29,7 @@ from app.chat.deepseek_client import (
     set_caller,
 )
 from app.chat.markdown_utils import normalize_markdown
-from app.chat.rag import retrieve_kb
+from app.chat.rag import retrieve_kb, resolve_index_dir
 from app.chat.consultation import bounded_history, consultation_context
 from app.chat.sse import should_stream, sse_pack, sse_response
 from app.chat.store import append_history, get_conv, set_conv
@@ -389,22 +389,28 @@ def regenerate_liuyao_chat(
     conversation_id: str,
     user_id: int,
     db: Session,
-) -> str:
+    expected_message_id=None,
+    expected_hexagram_id=None,
+):
     """
     重新生成上一条 assistant 回复（一次性，非流式）。
     复用现有 history 的最后一条 user 消息。
     """
-    conv = get_conv(conversation_id)
-    if not conv:
-        raise ValueError("会话不存在")
-
-    if conv.get("kind") != "liuyao":
-        raise ValueError("会话类型不匹配")
-
-    if conv.get("user_id") and conv["user_id"] != user_id:
-        raise ValueError("无权访问此会话")
-
-    history = list(conv.get("history") or [])
+    from app.services.conversation_actions import owned_conversation, saved_messages, append_regeneration
+    from app.models.liuyao import LiuyaoHexagram
+    saved = owned_conversation(db, conversation_id, user_id, 'liuyao')
+    if expected_hexagram_id is not None and saved.liuyao_hexagram_id != expected_hexagram_id:
+        raise ValueError('会话不存在')
+    rows = saved_messages(db, saved.id)
+    if not rows or rows[-1].role != 'assistant':
+        raise ValueError('还没有已保存的完整回复，不能重新解读。')
+    target_id = rows[-1].id
+    if expected_message_id is not None and target_id != expected_message_id:
+        raise HTTPException(409, '会话已有新的回复，请重新加载后再重新解读。')
+    hexagram = db.get(LiuyaoHexagram, saved.liuyao_hexagram_id)
+    if not hexagram or hexagram.user_id != user_id:
+        raise ValueError('会话不存在')
+    history = bounded_history([{'role': row.role, 'content': row.content} for row in rows], len(rows))
     if not history:
         raise ValueError("会话尚无历史，无法重新生成")
 
@@ -418,21 +424,23 @@ def regenerate_liuyao_chat(
         raise ValueError("未找到上一条用户消息")
 
     truncated = history[: last_user_idx + 1]
-    composed_system = conv.get("pinned") or ""
+    base_prompt = utils.load_liuyao_system_prompt_from_db()
+    try:
+        kb_passages = retrieve_kb(history[last_user_idx]['content'], resolve_index_dir('liuyao'), k=3)
+    except Exception:
+        kb_passages = []
+    composed_system = build_system_prompt(hexagram, kb_passages, base_prompt=base_prompt)
     messages = [{"role": "system", "content": composed_system}, *truncated]
+    messages[1:1] = consultation_context(db, saved.task_context, truncated)
     _print_deepseek_payload("regenerate", messages)
 
     set_caller("liuyao_chat_regenerate")
     reply = _post_process(call_deepseek(messages, thinking=False, require_complete=True))
 
-    # 把最后一条 assistant 替换掉
-    if last_user_idx + 1 < len(history) and history[last_user_idx + 1].get("role") == "assistant":
-        history[last_user_idx + 1]["content"] = reply
-    else:
-        history.append({"role": "assistant", "content": reply})
-
-    new_conv = dict(conv)
-    new_conv["history"] = history
-    set_conv(conversation_id, new_conv)
-
-    return reply
+    message_id = append_regeneration(db, saved.id, user_id, target_id, reply, 'liuyao')
+    from app.chat.store import delete_conv
+    try:
+        delete_conv(conversation_id)
+    except Exception:
+        logger.warning('regeneration_cache_invalidation_failed', conversation_id=conversation_id)
+    return {'reply': reply, 'message_id': message_id}

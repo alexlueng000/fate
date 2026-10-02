@@ -22,8 +22,10 @@ class LiuyaoChatQuickReq(BaseModel):
 
 class LiuyaoChatRegenerateReq(BaseModel):
     conversation_id: str = Field(..., min_length=1, max_length=64)
+    expected_message_id: Optional[int] = None
 
 
 class LiuyaoChatReply(BaseModel):
     conversation_id: str
     reply: str
+    message_id: Optional[int] = None

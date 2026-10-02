@@ -23,7 +23,7 @@ from .rag import retrieve_kb, resolve_index_dir
 from .consultation import bounded_history, consultation_context
 from .deepseek_client import call_deepseek, call_deepseek_stream, set_caller
 from .sse import should_stream, sse_pack, sse_response
-from .store import get_conv, set_conv, append_history, clear_history
+from .store import get_conv, set_conv, append_history, delete_conv
 from . import utils
 from app.services.completed_reply import save_completed_exchange as _save_db_exchange
 from app.services.conversation_report import PERSONAL_TITLES, require_personal_report
@@ -429,7 +429,7 @@ def send_chat(
                 if (
                     db_conv
                     and db_conv.user_id == user_id
-                    and db_conv.profile_id is not None
+                    and (db_conv.profile_id is not None or db_conv.bazi_chart_snapshot)
                     and db_conv.liuyao_hexagram_id is None
                 ):
                     # 用会话创建时的命盘快照（而非当前 live profile）
@@ -660,7 +660,7 @@ def send_chat(
 
     return reply
 
-def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
+def regenerate(conversation_id: str, user_id: Optional[int] = None, db=None, expected_message_id=None):
     """
     Regenerate the last AI response in a conversation.
 
@@ -669,12 +669,28 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         user_id: Current user ID for ownership check and DB recovery
 
     Returns:
-        Newly generated reply text
+        Newly generated reply and its saved message ID; the original is retained.
 
     Raises:
         ValueError: If conversation doesn't exist or can't be regenerated
     """
-    conv = get_conv(conversation_id)
+    from app.services.conversation_actions import owned_conversation, saved_messages, append_regeneration
+    target_id = None
+    db_conv_id = None
+    if user_id is not None:
+        saved = owned_conversation(db, conversation_id, user_id, 'bazi')
+        rows = saved_messages(db, saved.id)
+        if not rows or rows[-1].role != 'assistant':
+            raise ValueError('还没有已保存的完整回复，不能重新解读。')
+        target_id = rows[-1].id
+        if expected_message_id is not None and target_id != expected_message_id:
+            raise HTTPException(409, '会话已有新的回复，请重新加载后再重新解读。')
+        db_conv_id = saved.id
+        snapshot = saved.bazi_chart_snapshot or {}
+        conv = {'user_id': user_id, 'history': [{'role': row.role, 'content': row.content} for row in rows if row.role in ('user', 'assistant')],
+                'paipan': snapshot.get('mingpan', snapshot), 'task_context': saved.task_context, 'kb_index_dir': DEFAULT_KB_INDEX}
+    else:
+        conv = get_conv(conversation_id)
     if not conv:
         raise ValueError("会话不存在，请先 /chat/start")
 
@@ -683,7 +699,7 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     if conv_user_id is not None and conv_user_id != user_id:
         raise ValueError("会话不存在，请先 /chat/start")
 
-    history = conv.get("history", [])
+    history = bounded_history(conv.get("history", []), len(conv.get('history', [])) or 1)
     if not history:
         raise ValueError("历史为空，无法重生")
     if history[-1]["role"] != "assistant":
@@ -749,17 +765,16 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
     recentN = 10
     messages = [{"role": "system", "content": composed}]
     if (conv.get("task_context") or {}).get("taskType") == "career":
-        with utils.db_session() as context_db:
-            messages.extend(consultation_context(context_db, conv.get("task_context"), retry_history))
+        messages.extend(consultation_context(db, conv.get("task_context"), retry_history))
     messages.extend(bounded_history(retry_history, recentN))
 
     set_caller("regenerate")
-    reply = normalize_markdown(call_deepseek(messages))
+    reply = normalize_markdown(call_deepseek(messages, require_complete=True)).strip()
     # Apply sensitive word filtering
     try:
         from .content_filter import apply_content_filters
-        with utils.db_session() as db:
-            reply = apply_content_filters(reply, db)
+        with utils.db_session() as filter_db:
+            reply = apply_content_filters(reply, filter_db)
         # 修复敏感词过滤后可能被拆分的标题
         import re
         reply = re.sub(
@@ -771,9 +786,22 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None) -> str:
         reply = normalize_markdown(reply)
     except Exception:
         pass
-    # Replace the original assistant turn only after successful generation.
-    history[-1] = {"role": "assistant", "content": reply}
-    return reply
+    if not reply.strip():
+        raise ValueError('AI 服务未返回完整内容，原回答已保留。')
+    if is_opening_report:
+        require_personal_report(reply)
+    message_id = None
+    if db_conv_id is not None:
+        message_id = append_regeneration(db, db_conv_id, user_id, target_id, reply, 'bazi')
+        try:
+            delete_conv(conversation_id)
+        except Exception:
+            logger.warning('regeneration_cache_invalidation_failed', conversation_id=conversation_id)
+    else:
+        new_conv = dict(conv)
+        new_conv['history'] = [*conv.get('history', []), {'role': 'assistant', 'content': reply}]
+        set_conv(conversation_id, new_conv)
+    return {'reply': reply, 'message_id': message_id}
 
 
 def simplify_message(message_content: str, request: Request):
@@ -824,15 +852,24 @@ def simplify_message(message_content: str, request: Request):
     return {"content": reply}
 
 
-def clear(conversation_id: str) -> Dict[str, bool]:
+def clear(conversation_id: str, user_id=None, db=None):
     """
-    Clear conversation history while keeping the system prompt.
+    Start an empty conversation with the original chart and retain the archive.
 
     Args:
         conversation_id: Existing conversation ID
 
     Returns:
-        Dict with "ok" key indicating success
+        Dict with "ok" and the new "conversation_id".
     """
-    ok = clear_history(conversation_id, keep_pinned=True)
-    return {"ok": ok}
+    from app.services.conversation_actions import owned_conversation, fresh_bazi_conversation
+    if user_id is not None:
+        original = owned_conversation(db, conversation_id, user_id, 'bazi')
+        cid = f'bazi_conv_{fresh_bazi_conversation(db, original)}'
+    else:
+        original = get_conv(conversation_id)
+        if not original or original.get('user_id') is not None or original.get('kind') == 'liuyao':
+            raise ValueError('会话不存在')
+        cid = f'bazi_conv_{uuid.uuid4().hex[:8]}'
+        set_conv(cid, {**original, 'history': [], 'task_context': None})
+    return {'ok': True, 'conversation_id': cid}
