@@ -210,7 +210,9 @@ def _conversation_type_query(
     query = select(Conversation).where(Conversation.user_id == user_id)
     if type == "bazi":
         return query.where(
-            Conversation.profile_id.is_not(None),
+            or_(Conversation.profile_id.is_not(None),
+                Conversation.bazi_chart_snapshot['four_pillars'].as_string().is_not(None),
+                Conversation.bazi_chart_snapshot['mingpan']['four_pillars'].as_string().is_not(None)),
             Conversation.liuyao_hexagram_id.is_(None),
         )
     if type == "liuyao":

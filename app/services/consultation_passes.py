@@ -63,7 +63,7 @@ def erase_conversation(db, conversation_id):
 
 def owned_conversation(db, user_id, conversation_id, lock=False):
     stmt = select(Conversation).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
-    conversation = db.scalar(stmt.with_for_update() if lock else stmt)
+    conversation = db.scalar(stmt.with_for_update().execution_options(populate_existing=True) if lock else stmt)
     if not conversation:
         raise ReadingError("解读记录不存在", 404)
     return conversation
@@ -73,9 +73,16 @@ def available(reading, now):
     return reading.status == "ACTIVE" and reading.expires_at is not None and now < reading.expires_at
 
 
+def current_message_id(db, conversation_id):
+    # Use a current read under the conversation lock. A plain aggregate can
+    # observe an earlier snapshot under MySQL's REPEATABLE READ isolation.
+    return db.scalar(select(Message.id).where(Message.conversation_id == conversation_id)
+                     .order_by(Message.id.desc()).limit(1).with_for_update()) or 0
+
+
 def bind(db, user_id, pass_id, conversation_id, now=None):
     owned_conversation(db, user_id, conversation_id, lock=True)
-    reading = db.scalar(select(ConsultationPass).where(ConsultationPass.id == pass_id, ConsultationPass.user_id == user_id).with_for_update())
+    reading = db.scalar(select(ConsultationPass).where(ConsultationPass.id == pass_id, ConsultationPass.user_id == user_id).with_for_update().execution_options(populate_existing=True))
     if not reading:
         raise ReadingError("解读权益不存在", 404)
     if reading.conversation_id not in (None, conversation_id):
@@ -89,11 +96,12 @@ def bind(db, user_id, pass_id, conversation_id, now=None):
 def reserve(db, user_id, conversation_id, pass_id, request_key, message, now=None):
     now = now or datetime.utcnow()
     owned_conversation(db, user_id, conversation_id, lock=True)
-    reading = db.scalar(select(ConsultationPass).where(ConsultationPass.id == pass_id, ConsultationPass.user_id == user_id).with_for_update())
+    reading = db.scalar(select(ConsultationPass).where(ConsultationPass.id == pass_id, ConsultationPass.user_id == user_id).with_for_update().execution_options(populate_existing=True))
     if not reading or reading.conversation_id != conversation_id:
         raise ReadingError("请先将解读权益用于当前问题", 403)
     digest = hashlib.sha256(message.encode()).hexdigest()
-    previous = db.scalar(select(ConsultationRequest).where(ConsultationRequest.user_id == user_id, ConsultationRequest.request_key == request_key))
+    previous = db.scalar(select(ConsultationRequest).where(ConsultationRequest.user_id == user_id, ConsultationRequest.request_key == request_key)
+                         .with_for_update().execution_options(populate_existing=True))
     if previous:
         if previous.input_hash != digest or previous.pass_id != pass_id or previous.conversation_id != conversation_id:
             raise ReadingError("请求标识已用于另一条消息")
@@ -103,7 +111,8 @@ def reserve(db, user_id, conversation_id, pass_id, request_key, message, now=Non
             raise ReadingError("这条解读仍在生成，请稍候")
     if not available(reading, now) or reading.replies_used >= reading.reply_limit:
         raise ReadingError("本次权益已到期或回复额度已用完；历史内容仍可查看", 402)
-    pending = db.scalars(select(ConsultationRequest).where(ConsultationRequest.conversation_id == conversation_id, ConsultationRequest.status == "PENDING")).all()
+    pending = db.scalars(select(ConsultationRequest).where(ConsultationRequest.conversation_id == conversation_id, ConsultationRequest.status == "PENDING")
+                         .with_for_update().execution_options(populate_existing=True)).all()
     for item in pending:
         if item.created_at > now - timedelta(minutes=15):
             raise ReadingError("当前问题已有一条解读正在生成")
@@ -112,7 +121,8 @@ def reserve(db, user_id, conversation_id, pass_id, request_key, message, now=Non
         # A failed key is not reused while an old worker might still be completing.
         raise ReadingError("上次请求未完成，请重新提交并使用新的请求标识")
     reservation = ConsultationRequest(pass_id=pass_id, user_id=user_id, conversation_id=conversation_id,
-        request_key=request_key, input_hash=digest, user_message=message, created_at=now)
+        request_key=request_key, input_hash=digest, user_message=message, created_at=now,
+        baseline_message_id=current_message_id(db, conversation_id))
     db.add(reservation)
     db.flush()
     return reservation
@@ -124,12 +134,15 @@ def finish(db, request_id, reply=None, now=None):
     if not initial:
         return False
     conversation = owned_conversation(db, initial.user_id, initial.conversation_id, lock=True)
-    reading = db.scalar(select(ConsultationPass).where(ConsultationPass.id == initial.pass_id).with_for_update())
+    reading = db.scalar(select(ConsultationPass).where(ConsultationPass.id == initial.pass_id).with_for_update().execution_options(populate_existing=True))
     reservation = db.scalar(select(ConsultationRequest).where(ConsultationRequest.id == request_id).with_for_update().execution_options(populate_existing=True))
     if reservation.status != "PENDING":
         return reservation.status == "SUCCEEDED"
     now = now or datetime.utcnow()
-    if not reply or not reply.strip() or reading.status != "ACTIVE" or reservation.created_at <= now - timedelta(minutes=15):
+    latest = current_message_id(db, conversation.id)
+    if (not reply or not reply.strip() or reading.status != "ACTIVE" or reservation.created_at <= now - timedelta(minutes=15)
+            or hashlib.sha256(reservation.user_message.encode()).hexdigest() != reservation.input_hash
+            or reservation.baseline_message_id is None or reservation.baseline_message_id != latest):
         reservation.status = "FAILED"
         reservation.completed_at = now
         return False
@@ -139,7 +152,8 @@ def finish(db, request_id, reply=None, now=None):
     reservation.completed_at = now
     reading.replies_used += 1
     conversation.updated_at = now
-    for role, content in (("user", reservation.user_message), ("assistant", reply)):
-        db.add(Message(conversation_id=reservation.conversation_id, user_id=reservation.user_id, role=role, content=content))
+    assistant = Message(conversation_id=reservation.conversation_id, user_id=reservation.user_id, role='assistant', content=reply)
+    db.add_all([Message(conversation_id=reservation.conversation_id, user_id=reservation.user_id, role='user', content=reservation.user_message), assistant])
     db.flush()
+    reservation.message_id = assistant.id
     return True

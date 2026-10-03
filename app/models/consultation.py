@@ -32,5 +32,7 @@ class ConsultationRequest(Base):
     user_message: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(16), default="PENDING", nullable=False)
     reply: Mapped[Optional[str]] = mapped_column(Text)
+    baseline_message_id: Mapped[Optional[int]] = mapped_column(Integer)
+    message_id: Mapped[Optional[int]] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)

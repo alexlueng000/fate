@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS consultation_requests (
  user_message TEXT NOT NULL,
  status VARCHAR(16) NOT NULL DEFAULT 'PENDING',
  reply MEDIUMTEXT NULL,
+ baseline_message_id INT NULL,
+ message_id INT NULL,
  created_at DATETIME NOT NULL,
  completed_at DATETIME NULL,
  UNIQUE KEY uq_consult_request(user_id, request_key),

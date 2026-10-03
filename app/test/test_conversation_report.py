@@ -105,6 +105,47 @@ def test_no_complete_report_does_not_invent_one(saved):
     assert client.get('/conversations?type=bazi').json()['items'][0]['report_source_message_id'] is None
 
 
+@pytest.mark.parametrize('wrapped', [False, True])
+def test_owned_guest_report_without_profile_is_discoverable_in_history(saved, wrapped):
+    client, sessions, identity, _, _, chart = saved
+    snapshot = chart if wrapped else chart['mingpan']
+    with sessions() as db:
+        conversation = db.get(Conversation, 1)
+        conversation.profile_id = None; conversation.bazi_chart_snapshot = snapshot
+        db.commit()
+    listing = client.get('/conversations?type=bazi&q=工作').json()
+    assert listing['total'] == 1 and listing['items'][0]['id'] == 1
+    assert listing['items'][0]['report_source_message_id'] == 4
+    assert listing['items'][0]['bazi_summary'].startswith('甲子')
+    assert client.get('/conversations/1/report').json()['profile']['bazi_chart'] == snapshot
+    assert client.get('/conversations?type=liuyao').json()['total'] == 0
+    identity['id'] = 2
+    assert client.get('/conversations?type=bazi').json()['total'] == 0
+    assert client.get('/conversations/1/report').status_code == 404
+
+
+def test_bulk_bazi_delete_includes_owned_guest_snapshot_and_preserves_other_users(saved):
+    client, sessions, *_ = saved
+    with sessions() as db:
+        db.get(Conversation, 1).profile_id = None
+        db.add(Conversation(id=2, user_id=2, title='他人游客报告', bazi_chart_snapshot={'four_pillars': {'year': ['丙', '寅']}}))
+        db.commit()
+    response = client.delete('/conversations?type=bazi')
+    assert response.status_code == 200 and response.json()['deleted'] == 1
+    assert client.get('/conversations/1/report').status_code == 404
+    with sessions() as db: assert db.get(Conversation, 2) is not None
+
+
+@pytest.mark.parametrize('snapshot', [None, {}, {'mingpan': None}])
+def test_missing_guest_chart_does_not_become_a_bazi_history_source(saved, snapshot):
+    client, sessions, *_ = saved
+    with sessions() as db:
+        conversation = db.get(Conversation, 1)
+        conversation.profile_id = None; conversation.bazi_chart_snapshot = snapshot
+        db.commit()
+    assert client.get('/conversations?type=bazi').json()['total'] == 0
+
+
 def test_headings_in_code_quotes_or_nested_lists_do_not_make_a_report():
     assert report_sections('```markdown\n' + REPORT + '\n```') == []
     assert report_sections('\n'.join('> ' + line for line in REPORT.splitlines())) == []

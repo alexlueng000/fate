@@ -3,7 +3,8 @@ from datetime import datetime, timedelta
 import json
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.db import get_db, SessionLocal
@@ -62,15 +63,54 @@ def status(conversation_id: int, db: Session = Depends(get_db), user: User = Dep
     return {"conversation_id": conversation_id, "question": conversation.title, "passes": [serialize(r) for r in readings]}
 
 
+def serialize_request(db, item):
+    import hashlib
+    if hashlib.sha256(item.user_message.encode()).hexdigest() != item.input_hash:
+        raise HTTPException(409, '原问题记录无法确认，请查看原对话。')
+    status = "EXPIRED" if item.status == "PENDING" and item.created_at <= datetime.utcnow() - timedelta(minutes=15) else item.status
+    if status == 'SUCCEEDED' and item.message_id is not None:
+        message = db.get(Message, item.message_id)
+        if not message or message.user_id != item.user_id or message.conversation_id != item.conversation_id or message.role != 'assistant' or message.content != item.reply:
+            raise HTTPException(409, '已保存回复的来源无法确认，请查看原对话。')
+    return {'status': status, 'conversation_id': item.conversation_id, 'request_key': item.request_key,
+            'pass_id': item.pass_id, 'message': item.user_message, 'reply': item.reply if status == 'SUCCEEDED' else None,
+            'message_id': item.message_id if status == 'SUCCEEDED' else None,
+            'baseline_message_id': item.baseline_message_id}
+
+
+@router.get("/{conversation_id}/request")
+def conversation_request(conversation_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Read an owned unfinished question; never reserve, expire or charge it."""
+    enabled()
+    try:
+        passes.owned_conversation(db, user.id, conversation_id)
+        query = select(ConsultationRequest).where(ConsultationRequest.user_id == user.id, ConsultationRequest.conversation_id == conversation_id)
+        item = db.scalar(query.where(ConsultationRequest.status == 'PENDING').order_by(ConsultationRequest.id.desc()))
+        if not item:
+            latest = db.scalar(select(func.max(Message.id)).where(Message.conversation_id == conversation_id)) or 0
+            item = db.scalar(query.where(ConsultationRequest.status == 'FAILED', ConsultationRequest.baseline_message_id == latest)
+                             .order_by(ConsultationRequest.id.desc()))
+        return serialize_request(db, item) if item else {'status': 'IDLE', 'conversation_id': conversation_id}
+    except passes.ReadingError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(503, '保存状态服务暂不可用，请稍后重新加载。') from exc
+
+
 @router.get("/{conversation_id}/requests/{request_key}")
 def request_status(conversation_id: int, request_key: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     enabled()
-    item = db.scalar(select(ConsultationRequest).where(ConsultationRequest.user_id == user.id,
-        ConsultationRequest.conversation_id == conversation_id, ConsultationRequest.request_key == request_key))
-    if not item:
-        raise HTTPException(404, "请求记录不存在")
-    status = "EXPIRED" if item.status == "PENDING" and item.created_at <= datetime.utcnow() - timedelta(minutes=15) else item.status
-    return {"status": status}
+    try:
+        passes.owned_conversation(db, user.id, conversation_id)
+        item = db.scalar(select(ConsultationRequest).where(ConsultationRequest.user_id == user.id,
+            ConsultationRequest.conversation_id == conversation_id, ConsultationRequest.request_key == request_key))
+        if not item:
+            raise HTTPException(404, "请求记录不存在")
+        return serialize_request(db, item)
+    except passes.ReadingError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+    except SQLAlchemyError as exc:
+        raise HTTPException(503, '保存状态服务暂不可用，请稍后重新加载。') from exc
 
 
 class BindIn(BaseModel):
@@ -134,13 +174,18 @@ def send(conversation_id: int, body: MessageIn, request: Request, db: Session = 
     try:
         reservation = passes.reserve(db, user.id, conversation_id, body.pass_id, body.request_key, body.message.strip())
         if reservation.status == "SUCCEEDED":
-            return sse_response(lambda: iter([sse_pack({"text": reservation.reply, "replace": True}), sse_pack("[DONE]")]))
+            serialize_request(db, reservation)
+            return sse_response(lambda: iter([sse_pack({"text": reservation.reply, "replace": True}),
+                sse_pack({'meta': {'message_id': reservation.message_id}}), sse_pack("[DONE]")]))
         reservation_id = reservation.id
         messages = build_messages(db, passes.owned_conversation(db, user.id, conversation_id), body.message.strip())
         db.commit()
     except passes.ReadingError as exc:
         db.rollback()
         raise HTTPException(exc.status, str(exc)) from exc
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(503, '解读保存服务暂不可用，请稍后重新加载。') from exc
 
     def generate():
         completed = False
@@ -156,6 +201,8 @@ def send(conversation_id: int, body: MessageIn, request: Request, db: Session = 
             with SessionLocal() as session:
                 completed = passes.finish(session, reservation_id, final)
                 session.commit()
+                saved_request = session.get(ConsultationRequest, reservation_id)
+                message_id = saved_request.message_id if completed else None
             if not completed:
                 raise ValueError("empty or revoked reading")
             # Invalidate old in-memory copies; existing chat routes can recover DB history.
@@ -167,6 +214,7 @@ def send(conversation_id: int, body: MessageIn, request: Request, db: Session = 
                 # A cache outage must not misreport an already committed reply as free failure.
                 pass
             yield sse_pack({"text": final, "replace": True})
+            yield sse_pack({'meta': {'message_id': message_id}})
             yield sse_pack("[DONE]")
         except Exception:
             message = ("保存结果暂时无法确认，请刷新记录与权益后再决定是否重试。" if completed
