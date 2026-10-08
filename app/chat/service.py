@@ -86,6 +86,54 @@ def _create_db_conversation(
 
 # ===================== 对话入口 =====================
 
+def retrieve_report_kb(paipan: Dict[str, Any], index_dir: str, k: int = 3) -> List[str]:
+    """Retrieve bounded, deduplicated evidence across report topics."""
+    pillars = (paipan or {}).get('four_pillars') or {}
+    if not all(pillars.get(key) for key in ('year', 'month', 'day', 'hour')):
+        return []
+    chart = utils.format_four_pillars(paipan['four_pillars'])
+    topics = (
+        '日主 月令 旺衰 格局 调候 喜用神 五行 生克制化',
+        '十神 性格 做事方式 事业 财星 官杀 印星 食伤',
+        '婚姻 感情 人际 配偶星 夫妻宫 合冲刑害',
+        '大运 流年 岁运 三年关键节点 行动建议',
+    )
+    passages = []
+    for topic in topics:
+        try:
+            matches = retrieve_kb(f'{topic}\n{chart}', index_dir, k=min(3, max(1, k)))
+        except Exception as error:
+            logger.warning('report_rag_failed', topic=topic, error=str(error))
+            continue
+        for passage in matches:
+            if passage not in passages:
+                passages.append(passage)
+    return passages[:12]
+
+
+def build_report_request(paipan: Dict[str, Any]) -> str:
+    """Report task in user role; the administrator still controls system prompts."""
+    return (
+        f"我的命盘信息如下：\n"
+        f"排盘使用的公历日期时间：{paipan.get('solar_date', '')}\n"
+        f"性别：{paipan['gender']}\n"
+        f"八字：\n{utils.format_four_pillars(paipan['four_pillars'])}\n"
+        f"大运：\n{utils.format_dayun(paipan['dayun'])}\n\n"
+        "请基于以上命盘做一份有分析依据的完整八字解读。保留必要的命理术语，紧接着用白话解释。"
+        "先在个人画像中分析日主、月令、得令得地得势、五行生克制化与旺衰，再说明格局、调候和喜忌的判断依据；"
+        "证据不足或存在不同判断时说明条件，不强定格局或用神。"
+        "性格特点、做事方式、人际与感情均按“命盘依据—作用关系—倾向判断—现实建议”展开，"
+        "结合相关十神、宫位和合冲刑害；不要只堆术语或写适用于所有人的泛泛鼓励。"
+        "行动建议要对应前文依据。三年关键节点逐年核对当前年份起三年的大运、流年干支及其与原局的作用，"
+        "解释机会、约束和建议，不只列年份和结论。"
+        "只在知识库实际提供相关片段时引用其来源，不编造原文、出处或现实经历；"
+        "传统命理判断表达为倾向与条件，不承诺确定事件。"
+        "请按以下七个三级标题依次组织，每章写出实质内容，不省略章节：\n"
+        + "\n".join(f"### {title}" for title in PERSONAL_TITLES) + "\n"
+        "结尾需要另起一行提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
+    )
+
+
 def start_chat(
     paipan: Dict[str, Any],
     kb_index_dir: Optional[str],
@@ -104,7 +152,7 @@ def start_chat(
     Args:
         paipan: Bazi calculation result (four pillars and dayun)
         kb_index_dir: Knowledge base index directory path
-        kb_topk: Number of knowledge base passages to retrieve
+        kb_topk: Passages per report topic (0 uses 3; capped at 3)
         request: FastAPI request object (for streaming detection)
         user_id: Optional user ID for database persistence
         db: Optional database session for persistence
@@ -122,14 +170,12 @@ def start_chat(
     with utils.timer("pre", spans):
         kb_passages: List[str] = []
 
-        # 1）RAG 耗时
-        if kb_topk:
-            with utils.timer("pre_rag", spans):
-                kb_passages = retrieve_kb(
-                    "开场上下文",
-                    os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
-                    k=min(3, kb_topk)
-                )
+        # Reports always retrieve evidence, including old reservations with kb_topk=0.
+        with utils.timer("pre_rag", spans):
+            kb_passages = retrieve_report_kb(
+                paipan, os.path.abspath(kb_index_dir or resolve_index_dir("bazi")),
+                k=kb_topk or 3,
+            )
 
         # 2）读 DB 配置耗时
         with utils.timer("pre_db", spans):
@@ -183,18 +229,7 @@ def start_chat(
                 "task_context": task_context,
             })
 
-        opening_user_msg = (
-            f"我的命盘信息如下：\n"
-            f"排盘使用的公历日期时间：{paipan.get('solar_date', '')}\n"
-            f"性别：{paipan['gender']}\n"
-            f"八字：\n{utils.format_four_pillars(paipan['four_pillars'])}\n"
-            f"大运：\n{utils.format_dayun(paipan['dayun'])}\n\n"
-            "请基于以上命盘做一份通用且全面的解读，条理清晰，"
-            "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
-            "请按以下七个三级标题依次组织，每章写出实质内容，不省略章节：\n"
-            + "\n".join(f"### {title}" for title in PERSONAL_TITLES) + "\n"
-            "结尾需要另起一行提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
-        )
+        opening_user_msg = build_report_request(paipan)
 
         messages = [
             {"role": "system", "content": composed},
@@ -732,19 +767,26 @@ def regenerate(conversation_id: str, user_id: Optional[int] = None, db=None, exp
     if not last_user_msg:
         last_user_msg = "请基于以上上下文继续完善上一轮解读。"
 
-    kb_dir = conv.get("kb_index_dir")
-    kb_passages: List[str] = []
-    if kb_dir and os.path.exists(os.path.join(kb_dir, "chunks.json")):
-        try:
-            kb_passages = retrieve_kb(last_user_msg, kb_dir, k=3)
-        except Exception:
-            kb_passages = []
-
     is_opening_report = (
         len(retry_history) == 1
         and retry_history[0].get("role") == "user"
         and "我的命盘信息如下" in retry_history[0].get("content", "")
     )
+    kb_dir = conv.get("kb_index_dir") or resolve_index_dir("bazi")
+    kb_passages: List[str] = []
+    if is_opening_report:
+        kb_passages = retrieve_report_kb(conv.get("paipan") or {}, kb_dir)
+        snapshot = conv.get('paipan') or {}
+        complete_chart = all((snapshot.get('four_pillars') or {}).get(key) for key in ('year', 'month', 'day', 'hour'))
+        if complete_chart and snapshot.get('dayun') and snapshot.get('gender'):
+            last_user_msg = build_report_request(snapshot)
+            retry_history = [{"role": "user", "content": last_user_msg}]
+    elif os.path.exists(os.path.join(kb_dir, "chunks.json")):
+        try:
+            kb_passages = retrieve_kb(last_user_msg, kb_dir, k=3)
+        except Exception:
+            kb_passages = []
+
     base_prompt = (
         utils.load_report_system_prompt_from_db()
         if is_opening_report

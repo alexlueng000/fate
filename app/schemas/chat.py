@@ -60,7 +60,7 @@ class ChatStartReq(BaseModel):
     paipan: Optional[PaipanPayload] = None
     guest_analysis_public_id: Optional[str] = None
     kb_index_dir: Optional[str] = None
-    kb_topk: int = 0
+    kb_topk: int = Field(0, ge=0, description="报告每个主题检索的片段数，0 使用自动值 3；最多每主题 3 条")
     note: Optional[str] = None
     task_context: Optional[Dict[str, Any]] = None
 

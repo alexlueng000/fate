@@ -315,30 +315,18 @@ async def websocket_chat(websocket: WebSocket):
             await websocket.send_json({"meta": {"conversation_id": cid}})
 
             # 构建消息（复用 start_chat 逻辑）
-            from app.chat.utils import load_system_prompt_from_db, build_full_system_prompt
-            from app.chat.rag import retrieve_kb
+            from app.chat.utils import load_report_system_prompt_from_db, build_full_system_prompt
+            from app.chat.rag import resolve_index_dir
+            from app.chat.service import retrieve_report_kb, build_report_request
             import os
 
-            DEFAULT_KB_INDEX = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "kb_index"))
-
-            # RAG 检索
-            kb_passages = []
-            if kb_topk:
-                try:
-                    kb_passages = retrieve_kb(
-                        "开场上下文",
-                        os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX),
-                        k=min(3, kb_topk)
-                    )
-                except Exception as e:
-                    logger.warning(f"RAG failed: {e}")
-
-            # 构建 system prompt
-            base_prompt = load_system_prompt_from_db()
+            DEFAULT_KB_INDEX = resolve_index_dir("bazi")
+            kb_passages = retrieve_report_kb(
+                paipan, os.path.abspath(kb_index_dir or DEFAULT_KB_INDEX), k=kb_topk or 3,
+            )
+            base_prompt = load_report_system_prompt_from_db()
             composed = build_full_system_prompt(
-                base_prompt,
-                kb_passages,
-                paipan=paipan,
+                base_prompt, kb_passages, paipan=paipan, include_suggested_questions=False,
             )
 
             # 保存会话
@@ -351,22 +339,7 @@ async def websocket_chat(websocket: WebSocket):
                 "paipan": paipan,  # 保存八字信息，用于后续对话
             })
 
-            opening_user_msg = (
-                f"我的命盘信息如下：\n"
-                f"排盘使用的公历日期时间：{paipan.get('solar_date', '')}\n"
-                f"性别：{paipan['gender']}\n"
-                f"八字：\n四柱：\n年柱: {''.join(paipan['four_pillars']['year'])}\n"
-                f"月柱: {''.join(paipan['four_pillars']['month'])}\n"
-                f"日柱: {''.join(paipan['four_pillars']['day'])}\n"
-                f"时柱: {''.join(paipan['four_pillars']['hour'])}\n"
-                f"大运：\n" + "\n".join(
-                    f"- 起始年龄 {item['age']}，起运年 {item['start_year']}，大运 {''.join(item['pillar'])}"
-                    for item in paipan['dayun']
-                ) + "\n\n"
-                "请基于以上命盘做一份通用且全面的解读，条理清晰，"
-                "涵盖性格亮点、适合方向、注意点与三年内重点建议。"
-                "结尾提醒：以上内容由传统文化AI生成，仅供娱乐参考。"
-            )
+            opening_user_msg = build_report_request(paipan)
 
             messages = [
                 {"role": "system", "content": composed},
@@ -431,10 +404,10 @@ async def websocket_chat(websocket: WebSocket):
                 except Exception:
                     kb_passages = []
 
-            composed = conv["pinned"]
-            if kb_passages:
-                kb_block = "\n\n".join(kb_passages)
-                composed = f"{composed}\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
+            composed = chat_utils.build_full_system_prompt(
+                chat_utils.load_system_prompt_from_db(), kb_passages,
+                paipan=conv.get("paipan") or {},
+            )
 
             # 注入本命八字锚点：避免对话中出现多个八字时混淆
             paipan = conv.get("paipan") or {}

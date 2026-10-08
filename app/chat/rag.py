@@ -17,11 +17,21 @@ def resolve_index_dir(kb_type: str = "bazi") -> str:
         raise ValueError("Unknown knowledge base type")
     root = Path(__file__).resolve().parents[2]
     override = os.getenv(f"KB_{kb_type.upper()}_INDEX_DIR")
+    if not override and kb_type == "bazi":
+        override = os.getenv("KB_INDEX_DIR")
     if override:
         return str(Path(override).resolve())
     canonical = root / "kb_index" / kb_type
     legacy = root / ("kb_index_bazi" if kb_type == "bazi" else "kb_index_liuyao")
-    return str(canonical if (canonical / "chunks.json").is_file() or not (legacy / "chunks.json").is_file() else legacy)
+    if (canonical / "chunks.json").is_file():
+        return str(canonical)
+    if (legacy / "chunks.json").is_file():
+        return str(legacy)
+    # Older installations stored only the Bazi index directly under kb_index.
+    shared_legacy = root / "kb_index"
+    if kb_type == "bazi" and (shared_legacy / "chunks.json").is_file():
+        return str(shared_legacy)
+    return str(canonical)
 
 
 def _load_and_cache_index(index_dir: str) -> Dict[str, Any]:

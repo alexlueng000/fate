@@ -163,7 +163,7 @@ def save_index(index_dir: str, chunks: List[str], embs: np.ndarray, meta: dict, 
     np.savez_compressed(
         os.path.join(index_dir, "embeddings.npz"),
         embeddings=embs.astype(np.float32),
-        meta=np.bytes_(json.dumps(meta, ensure_ascii=False)),
+        meta=np.bytes_(json.dumps(meta, ensure_ascii=False).encode("utf-8")),
     )
     # 持久化 TF-IDF（如使用）
     if tfidf_vec is not None:

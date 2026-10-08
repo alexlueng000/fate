@@ -5,10 +5,11 @@ from typing import List, Dict, Any, Optional
 
 from fastapi import HTTPException
 
-from kb_rag_mult import chunk_text, EmbeddingBackend, save_index, load_index
+from kb_rag_mult import chunk_text, EmbeddingBackend, save_index, load_index, load_file, TFIDF_MODEL_FILENAME
+from app.chat.rag import resolve_index_dir, clear_index_cache
 
 KB_FILES_DIR = os.getenv("KB_FILES_DIR", "./kb_files")
-KB_INDEX_DIR = os.getenv("KB_INDEX_DIR", "./kb_index")
+KB_INDEX_DIR = resolve_index_dir("bazi")
 CHUNKS_JSON = os.path.join(KB_INDEX_DIR, "chunks.json")
 EMB_NPZ     = os.path.join(KB_INDEX_DIR, "embeddings.npz")
 MANIFEST    = os.path.join(KB_INDEX_DIR, "manifest.json")
@@ -82,18 +83,19 @@ def rebuild_index(mode: str = "auto", backend: Optional[str] = None, chunk_size:
     # 简化：这里先直接全量构建
     eb = EmbeddingBackend(force_backend=backend or "st")
 
-    all_chunks, all_sources, all_embs = [], [], None
-    import numpy as np
+    all_chunks, all_sources = [], []
     for f in files:
         path = os.path.join(KB_FILES_DIR, f["filename"])
-        text = open(path, "r", encoding="utf-8", errors="ignore").read() if path.endswith(".txt") else None
+        text = load_file(path)
         if not text:
             continue
         chunks = chunk_text(text, chunk_size=chunk_size, overlap=overlap)
-        embs = eb.transform(chunks)
         all_chunks.extend(chunks)
         all_sources.extend([{"file": f["filename"]} for _ in chunks])
-        all_embs = embs if all_embs is None else np.vstack([all_embs, embs])
+
+    if not all_chunks:
+        raise HTTPException(400, "知识库没有可索引的文本")
+    all_embs = eb.fit_transform(all_chunks)
 
     meta = {
         "backend": backend or "st",
@@ -104,7 +106,8 @@ def rebuild_index(mode: str = "auto", backend: Optional[str] = None, chunk_size:
         "files": [f["filename"] for f in files],
         "last_build": _now(),
     }
-    save_index(KB_INDEX_DIR, all_chunks, all_embs, meta, all_sources)
+    save_index(KB_INDEX_DIR, all_chunks, all_embs, meta, all_sources, eb.vectorizer)
+    clear_index_cache(KB_INDEX_DIR)
     return meta
 
 def query_kb(q: str, k: int = 5):
@@ -112,8 +115,9 @@ def query_kb(q: str, k: int = 5):
     if not (os.path.exists(CHUNKS_JSON) and os.path.exists(EMB_NPZ)):
         raise HTTPException(404, "索引不存在，请先重建")
     chunks, sources, embs, meta = load_index(KB_INDEX_DIR)
-    eb = EmbeddingBackend(force_backend=meta.get("backend", "st"))
-    if meta.get("backend") == "tfidf" and eb.vectorizer is not None:
+    model_path = os.path.join(KB_INDEX_DIR, TFIDF_MODEL_FILENAME)
+    eb = EmbeddingBackend(force_backend=meta.get("backend", "st"), tfidf_model_path=model_path)
+    if meta.get("backend") == "tfidf" and eb.vectorizer is not None and not os.path.isfile(model_path):
         eb.vectorizer.fit(chunks)
     q_vec = eb.transform([q])
     import numpy as np

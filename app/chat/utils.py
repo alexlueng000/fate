@@ -267,7 +267,7 @@ def fetch_latest_config(db, key: str) -> Optional[Dict[str, Any]]:
     sql = """
         SELECT `cfg_key`, `version`, `value_json`
         FROM `app_config`
-        WHERE `cfg_key` = :key
+        WHERE `cfg_key` = :key AND `is_active` = 1
         ORDER BY `version` DESC
         LIMIT 1
     """
@@ -542,7 +542,7 @@ def build_full_system_prompt(
         "分析阶段变化时，先核对对应年份的大运与流年，再给出判断。"
     )
     if kb_passages:
-        kb_block = "\n\n".join(kb_passages[:3])
+        kb_block = "\n\n".join(kb_passages[:3 if include_suggested_questions else 12])
         composed += f"\n\n【知识库摘录】\n{kb_block}\n\n请严格基于以上材料与排盘信息回答。"
     # Keep the single machine-readable follow-up protocol last so that later
     # formatting instructions cannot accidentally override it.
