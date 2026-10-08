@@ -67,3 +67,22 @@ def consultation_context(db, context: Any, history: list[dict]) -> list[dict]:
         # User-supplied data stays in user role, never promoted to system authority.
         messages.append({"role": "user", "content": "本次问题中我明确提供的背景：\n" + json.dumps(facts, ensure_ascii=False)})
     return messages
+
+
+def bazi_consultation_context(db, context: Any, history: list[dict]) -> list[dict]:
+    """Career instructions apply to the opening; later Bazi turns follow the user.
+
+    Keep the saved task and explicit facts, without treating an earlier career
+    question as a permanent restriction on subsequent topics.
+    """
+    follow_up = any(message.get('role') == 'assistant' for message in history)
+    messages = consultation_context(None if follow_up else db, context, history)
+    if follow_up:
+        for message in messages:
+            if message['role'] == 'user':
+                message['content'] = message['content'].replace(
+                    '本次问题中我明确提供的背景：',
+                    '此前事业问题中我明确提供的背景（仅在当前问题相关时参考）：',
+                    1,
+                )
+    return messages

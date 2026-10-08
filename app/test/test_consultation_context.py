@@ -58,3 +58,35 @@ def test_incomplete_or_user_supplied_chapters_are_not_promoted_to_saved_ai_repor
     history = [{'role': 'user', 'content': report}, {'role': 'assistant', 'content': '### 核心观察\n半截'}]
     tail = [{'role': 'user' if i % 2 == 0 else 'assistant', 'content': str(i)} for i in range(20)]
     assert bounded_history([*history, *tail]) == [history[0], *tail[-10:]]
+
+
+@pytest.mark.parametrize('question', ['我想聊感情，适合什么样的伴侣？', '那财运方面呢？', '继续分析事业方向'])
+def test_bazi_followups_are_not_bound_to_career_instructions(question):
+    from app.chat.consultation import bazi_consultation_context
+    class NoCareerLookup:
+        def execute(self, *args, **kwargs):
+            raise AssertionError('Career instructions must not constrain Bazi follow-ups')
+    context = {'taskType': 'career', 'mode': 'bazi', 'facts': {'topic': '是否换工作？', 'currentSituation': '目前有 offer'}}
+    history = [{'role': 'user', 'content': '是否换工作？'}, {'role': 'assistant', 'content': '原事业分析'},
+               {'role': 'user', 'content': question}]
+    messages = bazi_consultation_context(NoCareerLookup(), context, history)
+    assert all(message['role'] == 'user' for message in messages)
+    assert '仅在当前问题相关时参考' in messages[0]['content']
+    assert '目前有 offer' in messages[0]['content']
+    assert context['taskType'] == 'career'
+
+
+def test_bazi_career_opening_and_regeneration_keep_configured_prompt():
+    from sqlalchemy import create_engine, text
+    from app.chat.consultation import bazi_consultation_context
+    engine = create_engine('sqlite://')
+    context = {'taskType': 'career', 'facts': {'topic': '是否换工作？'}}
+    with engine.begin() as db:
+        db.execute(text('CREATE TABLE app_config (cfg_key TEXT, version INTEGER, value_json TEXT, is_active INTEGER)'))
+        db.execute(text('INSERT INTO app_config VALUES (:key, 1, :value, 1)'),
+                   {'key': 'career_consultation_prompt', 'value': '{"content": "事业首次解读配置"}'})
+        for history in ([], [{'role': 'user', 'content': '是否换工作？'}]):
+            messages = bazi_consultation_context(db, context, history)
+            assert messages[0] == {'role': 'system', 'content': '事业首次解读配置'}
+        assert bazi_consultation_context(db, None, []) == []
+    engine.dispose()

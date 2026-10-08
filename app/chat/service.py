@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from .markdown_utils import normalize_markdown
 from .rag import retrieve_kb, resolve_index_dir
-from .consultation import bounded_history, consultation_context, user_facts
+from .consultation import bounded_history, bazi_consultation_context as consultation_context, user_facts
 from .deepseek_client import call_deepseek, call_deepseek_stream, set_caller
 from .sse import should_stream, sse_pack, sse_response
 from .store import get_conv, set_conv, append_history, delete_conv
