@@ -110,11 +110,12 @@ def build_system_prompt(
 
     context = build_hexagram_context(hexagram)
     head = (base_prompt or "").strip() or LIUYAO_BASE_SYSTEM_PROMPT.strip()
+    from app.i18n import output_language_rule
 
     return (
         f"{head}"
         f"\n\n【本次卦象】\n{context}"
-        f"{kb_block}"
+        f"{kb_block}{output_language_rule()}"
         "\n\n【输出规范】\n"
         "- 仅允许使用 `###` 与 `####` 作为 Markdown 标题。\n"
         "- 段落之间用单行空行分隔，不使用粗体、斜体、引用块、分割线。\n"

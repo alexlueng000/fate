@@ -28,7 +28,9 @@ from app.services.products import get_by_code
 from app.services.quota import QuotaService
 from app.models import User, Order
 
-router = APIRouter(prefix="/payments", tags=["payments"])
+from app.region import require_payments
+
+router = APIRouter(prefix="/payments", tags=["payments"], dependencies=[Depends(require_payments)])
 
 
 @router.post("/wechat/native", response_model=WeChatNativeCheckoutOut, status_code=status.HTTP_201_CREATED)

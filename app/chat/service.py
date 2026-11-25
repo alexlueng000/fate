@@ -113,7 +113,8 @@ def retrieve_report_kb(paipan: Dict[str, Any], index_dir: str, k: int = 3) -> Li
 
 def build_report_request(paipan: Dict[str, Any]) -> str:
     """Report task in user role; the administrator still controls system prompts."""
-    return (
+    from app.i18n import output_language_rule
+    return output_language_rule() + (
         f"我的命盘信息如下：\n"
         f"排盘使用的公历日期时间：{paipan.get('solar_date', '')}\n"
         f"性别：{paipan['gender']}\n"

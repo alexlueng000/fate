@@ -547,6 +547,8 @@ def build_full_system_prompt(
     # Keep the single machine-readable follow-up protocol last so that later
     # formatting instructions cannot accidentally override it.
     # Skip it for one-shot reports (the report page has its own CTA flow).
+    from app.i18n import output_language_rule
+    composed += output_language_rule()
     if include_suggested_questions:
         return f"{append_md_rules(composed)}{SUGGESTED_QUESTIONS_RULES}"
     return append_md_rules(composed)

@@ -21,6 +21,8 @@ from app.services import payments
 
 
 def require_config() -> str:
+    from app.region import require_payment_service
+    require_payment_service()
     if not settings.wechat_jsapi_enabled or settings.wechat_pay_mode != "prod":
         raise ValueError("微信内支付暂未开通，请在电脑上打开网站后使用微信扫码支付。")
     if not settings.wechat_jsapi_appid or not settings.wechat_jsapi_secret:

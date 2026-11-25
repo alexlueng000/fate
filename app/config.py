@@ -3,7 +3,7 @@ import os
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import model_validator
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # -----------------------------
     # "development" | "production"
     app_env: str = "development"
+    fate_region: Literal["cn", "overseas"] = "cn"
+    fate_payments_enabled: bool = True
 
     # -----------------------------
     # App

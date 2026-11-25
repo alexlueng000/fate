@@ -99,7 +99,8 @@ def web_register(
     # 2) 查重
     existing = get_by_email(db, payload.email)
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="该邮箱已注册")
+        from app.i18n import auth_message
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=auth_message("该邮箱已注册"))
 
     # 3) 生成密码哈希（由 app.security.hash_password 实现）
     pwd_hash = hash_password(payload.password)
@@ -141,14 +142,17 @@ def web_login(payload: WebLoginRequest, db: Session = Depends(get_db_tx)) -> Aut
     user = get_by_email(db, payload.email)
     if not user or not user.password_hash:
         # 统一返回 401，避免暴露“邮箱是否存在”的信息
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
+        from app.i18n import auth_message
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=auth_message("邮箱或密码错误"))
 
     # 账户状态检查（若你启用了 status 字段）
     if getattr(user, "status", 1) != 1:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账户不可用")
+        from app.i18n import auth_message
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=auth_message("账户不可用"))
 
     if not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="邮箱或密码错误")
+        from app.i18n import auth_message
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=auth_message("邮箱或密码错误"))
 
     # 登录痕迹
     touch_last_login(db, user)

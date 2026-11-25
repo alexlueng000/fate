@@ -27,6 +27,8 @@ def create_app() -> FastAPI:
     Base.metadata.create_all(bind=engine)
 
     app = FastAPI(title=settings.app_name)
+    from app.i18n import LocaleMiddleware
+    app.add_middleware(LocaleMiddleware)
     from app.routers import consultations
     app.include_router(consultations.router, prefix="/api")
 

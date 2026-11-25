@@ -99,6 +99,8 @@ def _wechat_notify_url() -> str:
 
 
 def _wechat_auth_header(method: str, url_path: str, body: str) -> str:
+    from app.region import require_payment_service
+    require_payment_service()
     if not settings.wechat_pay_mchid:
         raise ValueError("WECHAT_PAY_MCHID is not configured")
     if not settings.wechat_pay_merchant_serial_no:
@@ -164,6 +166,8 @@ def verify_wechat_response(response: httpx.Response) -> None:
 
 
 def create_wechat_native_prepay(db: Session, *, order: Order) -> Payment:
+    from app.region import require_payment_service
+    require_payment_service()
     """
     Create a WeChat Pay v3 Native prepay order and store the returned QR code URL.
     """
